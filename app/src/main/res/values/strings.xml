@@ -1,11 +1,25 @@
 <resources>
     <string name="app_name">Nuvo</string>
-    <string name="action_go">Go</string>
-    <string name="baking_title">Baking with Gemini</string>
-    <string name="label_prompt">Prompt</string>
-    <string name="prompt_placeholder">Provide a recipe for the baked goods in the image</string>
-    <string name="image1_description">Cupcake</string>
-    <string name="image2_description">Cookies</string>
-    <string name="image3_description">Cake</string>
-    <string name="results_placeholder">(Results will appear here)</string>
+    <string name="recent_chats">Recent Chats</string>
+    <string name="no_recent_chats">No recent chats.</string>
+    <string name="back">Go back</string>
+    <string name="chat_input_placeholder">Send a message…</string>
+    <string name="chat_send_button_content_desc">Send</string>
+    <string name="chat_stop_button_content_desc">Stop</string>
+    <string name="chat_attach_button_content_desc">Attach a file</string>
+    <string name="open_drawer_content_desc">Open navigation drawer</string>
+    <string name="new_chat_content_desc">Start new chat</string>
+    <string name="select_ai_model_button">Select AI Model</string>
+    <string name="ai_model_selection_title">Choose AI Model</string>
+    <string name="settings_content_desc">Go to settings</string>
+    <string name="home_welcome_message">Welcome to</string>
+    <string name="home_instruction">Send a message to start chatting</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_openai_api_key_label">OpenAI API Key</string>
+    <string name="settings_api_key_hint">API Key</string>
+    <string name="settings_api_key_placeholder">Enter your OpenAI key here</string>
+    <string name="settings_show_api_key">Show API Key</string>
+    <string name="settings_hide_api_key">Hide API Key</string>
+    <string name="settings_save_button">Save</string>
 </resources>

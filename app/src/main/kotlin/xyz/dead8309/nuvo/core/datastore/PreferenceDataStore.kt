@@ -2,7 +2,6 @@ package xyz.dead8309.nuvo.core.datastore
 
 import android.util.Log
 import androidx.datastore.core.DataStore
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import xyz.dead8309.nuvo.core.model.AppSettings
 import xyz.dead8309.nuvo.datastore.proto.AppSettingsProto
@@ -11,7 +10,7 @@ import javax.inject.Inject
 
 class PreferenceDataStore @Inject constructor(
     private val appSettingsDataStore: DataStore<AppSettingsProto>
-){
+) {
     val appSettingsFlow = appSettingsDataStore.data
         .map {
             AppSettings(
@@ -27,7 +26,7 @@ class PreferenceDataStore @Inject constructor(
                 }
                 newPrefs
             }
-            Log.d("PreferenceDataStore", "OpenAI API key updated to: $apiKey")
+            Log.d("PreferenceDataStore", "OpenAI API key updated successfully")
         } catch (e: Exception) {
             Log.e("PreferenceDataStore", "Error setting OpenAI API key", e)
         }

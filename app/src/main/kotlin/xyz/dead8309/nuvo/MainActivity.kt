@@ -3,24 +3,21 @@ package xyz.dead8309.nuvo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.ui.Modifier
+import androidx.activity.enableEdgeToEdge
+import dagger.hilt.android.AndroidEntryPoint
+import xyz.dead8309.nuvo.ui.Nuvo
+import xyz.dead8309.nuvo.ui.rememberNuvoAppState
 import xyz.dead8309.nuvo.ui.theme.NuvoTheme
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
+            val appState = rememberNuvoAppState()
             NuvoTheme {
-                // A surface container using the 'background' color from the theme
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
-                    BakingScreen()
-                }
+                Nuvo(appState)
             }
         }
     }

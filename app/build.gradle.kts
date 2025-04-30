@@ -1,11 +1,14 @@
+import org.jetbrains.kotlin.compose.compiler.gradle.ComposeFeatureFlag
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.ksp)
-    alias(libs.plugins.hilt.android)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.kotlin.parcelize)
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.protobuf)
+    alias(libs.plugins.androidx.room)
 }
 
 android {
@@ -20,11 +23,18 @@ android {
         versionName = libs.versions.versionName.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary = true
+        }
+
+        buildConfigField("int", "VERSION_CODE", "$versionCode")
+        buildConfigField("String", "VERSION_NAME", "\"$versionName\"")
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -32,53 +42,92 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
     buildFeatures {
         compose = true
         buildConfig = true
     }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    room {
+        schemaDirectory("$projectDir/schemas")
+    }
+
+    protobuf {
+        protoc {
+            artifact = libs.protobuf.protoc.get().toString()
+        }
+        generateProtoTasks {
+            all().forEach { t ->
+                t.builtins {
+                    register("java") {
+                        option("lite")
+                    }
+                    register("kotlin") {
+                        option("lite")
+                    }
+                }
+            }
+        }
+    }
+}
+
+composeCompiler {
+    featureFlags = setOf(
+        ComposeFeatureFlag.OptimizeNonSkippingGroups
+    )
 }
 
 dependencies {
     // compose
-    implementation(libs.androidx.compose.ui)
+    implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.runtime)
+    implementation(libs.androidx.compose.animation)
+    implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.animation)
-    implementation(libs.androidx.compose.constraintlayout)
 
     // material
-    implementation(libs.androidx.compose.material)
     implementation(libs.androidx.compose.material.iconsExtended)
     implementation(libs.androidx.compose.material3)
 
-    api(libs.androidx.lifecycle)
+
+    // androidx
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity.ktx)
 
     // navigation
-    api(libs.androidx.navigation.compose)
+    implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation)
     implementation(libs.androidx.hilt.navigation.compose)
 
-    // di
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.android.compiler)
-
-    // database
+    // room
     implementation(libs.androidx.room.common)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.paging)
     ksp(libs.androidx.room.compiler)
-    implementation(libs.datastore)
 
-    // images
-    implementation(libs.palette)
-    implementation(libs.coil.kt)
+    // datastore
+    implementation(libs.androidx.datastore)
+    implementation(libs.androidx.datastore.core)
+    implementation(libs.protobuf.kotlin.lite)
+
+    // di
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
 
     // unit test
     testImplementation(libs.junit)
@@ -87,13 +136,22 @@ dependencies {
     testImplementation(libs.mockito.core)
     testImplementation(libs.mockito.kotlin)
 
-    // others
-    implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.accompanist)
-    implementation(libs.converter.gson)
+    // network
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.retrofit)
-    implementation(libs.okhttp.interceptor)
-    implementation(libs.arrow.core)
+    implementation(libs.bundles.ktor)
+
+    // others
+    implementation(libs.coil.kt)
+    implementation(libs.accompanist)
+    implementation(libs.openai.client)
+    implementation(libs.kotlinx.date.time)
+
+    // markdown
+    implementation(libs.markdown.renderer)
+    implementation(libs.markdown.renderer.m3)
+    implementation(libs.markdown.renderer.code)
+}
+
+ksp {
+    arg("dagger.hilt.android.internal.disableAndroidSuperclassValidation", "true")
 }

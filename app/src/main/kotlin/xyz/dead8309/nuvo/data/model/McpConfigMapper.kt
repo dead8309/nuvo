@@ -15,7 +15,6 @@ fun McpServerEntity.asDomainModel(): McpServer {
 
 fun McpServer.asEntity(): McpServerEntity {
     return McpServerEntity(
-        id = this.id,
         name = this.name,
         url = this.url,
         headers = this.headers,

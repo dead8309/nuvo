@@ -11,6 +11,7 @@ import kotlinx.serialization.json.Json
 import xyz.dead8309.nuvo.core.database.AppDatabase
 import xyz.dead8309.nuvo.core.database.dao.ChatMessageDao
 import xyz.dead8309.nuvo.core.database.dao.ChatSessionDao
+import xyz.dead8309.nuvo.core.database.dao.McpServerDao
 import xyz.dead8309.nuvo.core.database.model.InstantConverter
 import xyz.dead8309.nuvo.core.database.model.ToolCallListConverter
 import xyz.dead8309.nuvo.core.database.model.ToolResultConverter
@@ -53,4 +54,9 @@ object DatabaseModule {
     fun providesChatMessageDao(
         appDatabase: AppDatabase
     ): ChatMessageDao = appDatabase.chatMessageDao()
+
+    @Provides
+    fun providesMcpServerDao(
+        appDatabase: AppDatabase
+    ): McpServerDao = appDatabase.mcpServerDao()
 }

@@ -150,6 +150,9 @@ dependencies {
     implementation(libs.markdown.renderer)
     implementation(libs.markdown.renderer.m3)
     implementation(libs.markdown.renderer.code)
+
+    // mcp
+    implementation(libs.mcp)
 }
 
 ksp {

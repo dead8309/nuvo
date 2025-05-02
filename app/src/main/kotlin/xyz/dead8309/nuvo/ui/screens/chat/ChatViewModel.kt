@@ -6,11 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
-import io.ktor.client.HttpClient
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.get
-import io.ktor.client.request.parameter
-import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -27,14 +22,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
 import xyz.dead8309.nuvo.core.model.ChatMessage
 import xyz.dead8309.nuvo.core.model.ChatSession
+import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor
 import xyz.dead8309.nuvo.data.repository.ChatRepository
 import xyz.dead8309.nuvo.navigation.ChatRoute
 import javax.inject.Inject
@@ -48,12 +39,10 @@ private sealed interface AIResponseState {
     data class ExecutingToolCall(val toolCalls: List<ChatMessage.ToolCall>) : AIResponseState
 }
 
-@Serializable
-private data class GetWeatherArgs(val latitude: Float, val longitude: Float)
-
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
+    private val mcpToolExecutor: McpToolExecutor,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val json: Json = Json {
@@ -310,27 +299,42 @@ class ChatViewModel @Inject constructor(
         return coroutineScope {
             val deferredResults = toolCalls.map { toolCall ->
                 async {
+                    var result: String
+                    var toolResult = ChatMessage.ToolResult(
+                        isSuccess = false,
+                        resultDataJson = null
+                    )
                     try {
-                        when (toolCall.function.name) {
-                            "get_weather" -> executeGetCurrentWeather(toolCall, sessionId)
-                            else -> createErrorToolMessage(
-                                toolCall,
-                                sessionId,
-                                "Unknown function: ${toolCall.function.name}"
-                            )
-                        }
+                        result = mcpToolExecutor.executeTool(toolCall)
+                        toolResult = toolResult.copy(
+                            isSuccess = true,
+                            resultDataJson = result
+                        )
+                        Log.d(
+                            "ChatViewModel",
+                            "Tool call ${toolCall.function.name} executed with result: $result"
+                        )
                     } catch (e: Exception) {
                         Log.e(
                             "ChatViewModel",
                             "Error executing tool call ${toolCall.function.name}",
                             e
                         )
-                        createErrorToolMessage(
-                            toolCall,
-                            sessionId,
-                            "Error executing ${toolCall.function.name}: ${e.message}"
+                        result = e.message ?: "Unknown error"
+                        toolResult = toolResult.copy(
+                            isSuccess = false,
+                            resultDataJson = e.message
                         )
                     }
+                    ChatMessage(
+                        sessionId = sessionId,
+                        role = ChatMessage.Role.TOOL,
+                        content = json.encodeToString(result),
+                        timestamp = Clock.System.now(),
+                        toolCallId = toolCall.id,
+                        name = toolCall.function.name,
+                        toolResult = toolResult
+                    )
                 }
             }
             val resultMessages = deferredResults.awaitAll()
@@ -339,90 +343,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private suspend fun executeGetCurrentWeather(
-        toolCall: ChatMessage.ToolCall,
-        sessionId: String
-    ): ChatMessage {
-        Log.d("ChatViewModel", "Executing get_weather tool call: ${toolCall.function.name}")
-        var lat: Float? = null
-        var long: Float? = null
-        var resultJson: JsonElement?
-        var toolResult: ChatMessage.ToolResult = ChatMessage.ToolResult(
-            isSuccess = false,
-            resultDataJson = null
-        )
-        try {
-            val args = json.decodeFromString<GetWeatherArgs>(toolCall.function.argumentsJson)
-            lat = args.latitude
-            long = args.longitude
-            val client = HttpClient {
-                install(ContentNegotiation)
-            }
-            val response = client.get("https://api.open-meteo.com/v1/forecast") {
-                parameter("latitude", lat)
-                parameter("longitude", long)
-                parameter("current", "temperature_2m,wind_speed_10m")
-                parameter("hourly", "temperature_2m,relative_humidity_2m,wind_speed_10m")
-            }
-            val jsonBody = Json.parseToJsonElement(response.bodyAsText()).jsonObject
-            val temp = jsonBody["current"]?.jsonObject?.get("temperature_2m")?.toString()
-
-
-            resultJson = buildJsonObject {
-                put("latitude", lat)
-                put("longitude", long)
-                put("temperature", temp)
-            }
-            toolResult = toolResult.copy(isSuccess = true)
-            Log.d("ChatViewModel", "Weather tool call success for $lat, $long")
-        } catch (e: Exception) {
-            Log.e("ChatViewModel", "Error executing or parsing args for get_weather", e)
-            resultJson = buildJsonObject {
-                put("error", "Failed to get weather data for $lat, $long")
-                put("message", e.message)
-            }
-            toolResult = toolResult.copy(isSuccess = false)
-        }
-
-        toolResult = toolResult.copy(resultDataJson = resultJson.toString())
-        return ChatMessage(
-            sessionId = sessionId,
-            role = ChatMessage.Role.TOOL,
-            content = json.encodeToString(resultJson),
-            timestamp = Clock.System.now(),
-            toolCallId = toolCall.id,
-            name = toolCall.function.name,
-            toolResult = toolResult
-        )
-    }
-
-
-    private fun createErrorToolMessage(
-        toolCall: ChatMessage.ToolCall,
-        sessionId: String,
-        error: String
-    ): ChatMessage {
-        val resultJsonString = """{"error": "$error"}"""
-        val toolResult = ChatMessage.ToolResult(
-            isSuccess = false,
-            resultDataJson = resultJsonString
-        )
-        return ChatMessage(
-            sessionId = sessionId,
-            role = ChatMessage.Role.TOOL,
-            content = resultJsonString,
-            timestamp = Clock.System.now(),
-            toolCallId = toolCall.id,
-            name = toolCall.function.name,
-            toolResult = toolResult
-        )
-    }
-
     override fun onCleared() {
         Log.d("ChatViewModel", "ViewModel cleared, cancelling jobs.")
         messageCollectionJob?.cancel()
         aiResponseJob?.cancel()
-        super.onCleared()
         super.onCleared()
     }
 }

@@ -22,4 +22,17 @@
     <string name="settings_show_api_key">Show API Key</string>
     <string name="settings_hide_api_key">Hide API Key</string>
     <string name="settings_save_button">Save</string>
+
+    <string name="settings_mcp_servers_label">MCP Servers</string>
+    <string name="settings_mcp_servers_empty">No MCP Servers configured. Tap (+) to add one.</string>
+    <string name="settings_add_mcp_server_fab_desc">Add MCP Server</string>
+    <string name="settings_edit_mcp_server_desc">Edit %1$s</string>
+    <string name="settings_delete_mcp_server_desc">Delete %1$s</string>
+    <string name="settings_mcp_unnamed_server">(Unnamed Server)</string>
+
+    <string name="settings_add_mcp_server_title">Add MCP Server</string>
+    <string name="settings_edit_mcp_server_title">Edit MCP Server</string>
+    <string name="settings_mcp_server_name_label">Server Name</string>
+    <string name="settings_mcp_server_url_label">Server URL</string>
+    <string name="settings_mcp_server_headers_label">Headers</string>
 </resources>

@@ -29,41 +29,36 @@ import kotlinx.datetime.Clock
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import xyz.dead8309.nuvo.BuildConfig
 import xyz.dead8309.nuvo.core.model.ChatMessage
+import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor
 import xyz.dead8309.nuvo.data.repository.SettingsRepository
 import xyz.dead8309.nuvo.di.IoDispatcher
 import javax.inject.Inject
+import io.modelcontextprotocol.kotlin.sdk.Tool as McpTool
 
 private const val TAG = "OpenAIServiceImpl"
+private val SYSTEM_PROMPT = """
+    You are a helpful assistant with access to a variety of tools to answer user questions.
+
+    ### Tool Usage Guidelines
+    - Select the most relevant tool(s) to address the user's question.
+    - You can use multiple tools in a single response, including running multiple steps as needed.
+    - Always provide a final response after using the tools to ensure a seamless user experience.
+    - If no tools are available or suitable, inform the user that you don't know the answer. Suggest they can add a tool from the setting screen.
+    - If you don't know the answer, use the tools to find it or admit that you don't know.
+
+    ### Response Format
+    - Use Markdown for formatting when appropriate.
+    - Base your response on the output of the tools.
+    - Ensure your final answer directly addresses the user's question using the tool results.
+""".trimIndent()
 
 class OpenAIServiceImpl @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    private val mcpToolExecutor: McpToolExecutor,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : OpenAIService {
-
-    private val getWeatherTool = Tool.function(
-        name = "get_weather",
-        description = "Get the current temperature for the provided coordinates",
-        parameters = Parameters.buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("latitude") {
-                    put("type", "number")
-                    put("description", "The latitude of the location")
-                }
-                putJsonObject("longitude") {
-                    put("type", "number")
-                    put("description", "The longitude of the location")
-                }
-            }
-            putJsonArray("required") {
-                add("latitude")
-                add("longitude")
-            }
-        }
-    )
 
     override suspend fun getChatCompletionStream(messages: List<ChatMessage>): Flow<ChatMessage> =
         withContext(ioDispatcher) {
@@ -82,35 +77,21 @@ class OpenAIServiceImpl @Inject constructor(
             )
             val openAiClient = OpenAI(config)
 
+            val availableTools = try {
+                Log.d(TAG, "Fetching available tools")
+                mapMcpToolsToOpenAITools(mcpToolExecutor.getAvailableTools()) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching available tools", e)
+                emptyList()
+            }
             val systemMessage = systemMessage {
-                this.content = """
-                    You are a helpful assistant with access to a variety of tools.
-                    
-                    The tools are very powerful, and you can use them to answer the user's question.
-                    So choose the tool that is most relevant to the user's question.
-
-                    If tools are not available, say you don't know or if the user wants a tool they can add one from the server icon in bottom left corner in the sidebar.
-
-                    You can use multiple tools in a single response.
-                    Always respond after using the tools for better user experience.
-                    You can run multiple steps using all the tools!!!!
-                    Make sure to use the right tool to respond to the user's question.
-
-                    Multiple tools can be used in a single response and multiple steps can be used to answer the user's question.
-
-                    ## Response Format
-                    - Markdown is supported.
-                    - Respond according to tool's response.
-                    - Use the tools to answer the user's question.
-                    - If you don't know the answer, use the tools to find the answer or say you don't know.
-                """.trimIndent()
+                this.content = SYSTEM_PROMPT
             }
             val sdkMessages = mapToSdkMessages(messages)
             val request = chatCompletionRequest {
                 model = ModelId("gpt-4o-mini")
                 this.messages = listOf(systemMessage) + sdkMessages
-                // TODO: add tools here for mcp
-                tools = listOf(getWeatherTool)
+                tools = availableTools
             }
 
             val responseContentBuilder = StringBuilder()
@@ -251,6 +232,29 @@ private fun mapToSdkMessages(messages: List<ChatMessage>): List<com.aallam.opena
                 appMessage.name
             } else null,
             toolCalls = toolCalls,
+        )
+    }
+}
+
+private fun mapMcpToolsToOpenAITools(mcpTools: List<McpTool>): List<Tool>? {
+    if (mcpTools.isEmpty()) {
+        return null
+    }
+    return mcpTools.map { mcpTool ->
+        Tool.function(
+            name = mcpTool.name,
+            description = mcpTool.description,
+            parameters = Parameters.buildJsonObject {
+                put("type", mcpTool.inputSchema.type)
+                mcpTool.inputSchema.properties
+                mcpTool.inputSchema.required
+                put("properties", mcpTool.inputSchema.properties)
+                putJsonArray("required") {
+                    mcpTool.inputSchema.required?.map {
+                        add(it)
+                    }
+                }
+            }
         )
     }
 }

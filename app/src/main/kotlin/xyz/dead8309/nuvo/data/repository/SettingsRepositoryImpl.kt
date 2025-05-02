@@ -28,7 +28,7 @@ class SettingsRepositoryImpl @Inject constructor(
         preferenceDataStore.setOpenaiAPIKey(apiKey)
     }
 
-    override suspend fun getAllMcpServers(): Flow<List<McpServer>> {
+    override fun getAllMcpServers(): Flow<List<McpServer>> {
         return mcpServerDao.getAllServers()
             .map { entities -> entities.map { it.asDomainModel() } }
             .distinctUntilChanged()

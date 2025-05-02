@@ -96,3 +96,16 @@ class ToolResultConverter @Inject constructor(private val json: Json) {
         }
     }
 }
+
+@ProvidedTypeConverter
+class McpServerHeadersConverter @Inject constructor(private val json: Json) {
+    @TypeConverter
+    fun toJson(headers: Map<String, String>): String {
+        return json.encodeToString(headers)
+    }
+
+    @TypeConverter
+    fun fromJson(jsonString: String): Map<String, String> {
+        return json.decodeFromString(jsonString)
+    }
+}

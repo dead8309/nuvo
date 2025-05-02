@@ -1,8 +1,10 @@
 package xyz.dead8309.nuvo.ui.screens.settings
 
-import androidx.compose.runtime.Stable
+import androidx.compose.runtime.Immutable
+import xyz.dead8309.nuvo.core.model.McpServer
 
-@Stable
+@Immutable
 data class SettingsUiState(
-    val openAiApiKey: String = ""
+    val openAiApiKey: String = "",
+    val mcpServers: List<McpServer> = emptyList(),
 )

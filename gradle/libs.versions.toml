@@ -32,6 +32,7 @@ ktor = "3.1.2"
 aallam-openai = "4.0.1"
 kotlinxDatetime = "0.6.2"
 markdownRenderer = "0.33.0"
+mcp = "0.5.0"
 
 [libraries]
 
@@ -100,6 +101,9 @@ mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
 mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version.ref = "mockito-kotlin" }
 androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTest" }
 androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
+
+### MCP ###
+mcp = { group = "io.modelcontextprotocol", name = "kotlin-sdk", version.ref = "mcp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

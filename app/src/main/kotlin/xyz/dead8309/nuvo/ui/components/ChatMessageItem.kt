@@ -46,6 +46,7 @@ import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.rememberMarkdownState
 import kotlinx.datetime.Clock
 import xyz.dead8309.nuvo.core.model.ChatMessage
+import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor.Companion.extractOriginalToolName
 import xyz.dead8309.nuvo.ui.theme.NuvoTheme
 
 @Composable
@@ -147,7 +148,7 @@ fun ChatMessageItem(
                             val toolCallState = remember(toolCall.id) {
                                 mutableStateOf(
                                     ToolCallState(
-                                        toolName = toolCall.function.name,
+                                        toolName = extractOriginalToolName(toolCall.function.name),
                                         argumentsJson = toolCall.function.argumentsJson,
                                         resultJson = "",
                                         durationMs = 0L,
@@ -162,7 +163,9 @@ fun ChatMessageItem(
                                         0
                                     )
                                 toolCallState.value = toolCallState.value.copy(
-                                    toolName = toolMessage.name ?: toolCall.function.name,
+                                    toolName = extractOriginalToolName(
+                                        toolMessage.name ?: toolCall.function.name
+                                    ),
                                     argumentsJson = toolCall.function.argumentsJson,
                                     resultJson = toolMessage.content ?: "{}",
                                     durationMs = durationMs,

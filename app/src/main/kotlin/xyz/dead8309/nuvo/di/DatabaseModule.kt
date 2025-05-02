@@ -13,6 +13,7 @@ import xyz.dead8309.nuvo.core.database.dao.ChatMessageDao
 import xyz.dead8309.nuvo.core.database.dao.ChatSessionDao
 import xyz.dead8309.nuvo.core.database.dao.McpServerDao
 import xyz.dead8309.nuvo.core.database.model.InstantConverter
+import xyz.dead8309.nuvo.core.database.model.McpServerHeadersConverter
 import xyz.dead8309.nuvo.core.database.model.ToolCallListConverter
 import xyz.dead8309.nuvo.core.database.model.ToolResultConverter
 import javax.inject.Singleton
@@ -25,7 +26,9 @@ object DatabaseModule {
     @Singleton
     fun providesNetworkJson(): Json = Json {
         ignoreUnknownKeys = true
+        isLenient = true
         coerceInputValues = true
+        encodeDefaults =true
     }
 
     @Provides
@@ -34,7 +37,8 @@ object DatabaseModule {
         @ApplicationContext context: Context,
         instantConverter: InstantConverter,
         toolCallListConverter: ToolCallListConverter,
-        toolResultConverter: ToolResultConverter
+        toolResultConverter: ToolResultConverter,
+        mcpServerHeadersConverter: McpServerHeadersConverter
     ): AppDatabase = Room.databaseBuilder(
         context,
         AppDatabase::class.java,
@@ -43,6 +47,7 @@ object DatabaseModule {
         .addTypeConverter(instantConverter)
         .addTypeConverter(toolCallListConverter)
         .addTypeConverter(toolResultConverter)
+        .addTypeConverter(mcpServerHeadersConverter)
         .build()
 
     @Provides

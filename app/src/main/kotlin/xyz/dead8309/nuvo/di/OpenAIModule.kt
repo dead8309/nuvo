@@ -5,6 +5,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineDispatcher
+import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor
 import xyz.dead8309.nuvo.data.remote.openai.OpenAIService
 import xyz.dead8309.nuvo.data.remote.openai.OpenAIServiceImpl
 import xyz.dead8309.nuvo.data.repository.SettingsRepository
@@ -19,8 +20,9 @@ object OpenAIModule {
     @Singleton
     fun providesOpenAIService(
         settingsRepository: SettingsRepository,
-        @IoDispatcher dispatcher: CoroutineDispatcher
+        @IoDispatcher dispatcher: CoroutineDispatcher,
+        mcpToolExecutor: McpToolExecutor
     ): OpenAIService {
-        return OpenAIServiceImpl(settingsRepository, dispatcher)
+        return OpenAIServiceImpl(settingsRepository, mcpToolExecutor, dispatcher)
     }
 }

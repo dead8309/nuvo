@@ -11,7 +11,7 @@ interface SettingsRepository {
     suspend fun setOpenaiAPIKey(apiKey: String?)
 
     /** Flow of all MCP servers sorted by name. */
-    suspend fun getAllMcpServers(): Flow<List<McpServer>>
+    fun getAllMcpServers(): Flow<List<McpServer>>
 
     /**
      * Saves (inserts or updates) an MCP server configuration.

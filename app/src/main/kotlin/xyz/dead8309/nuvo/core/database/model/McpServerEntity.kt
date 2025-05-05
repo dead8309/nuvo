@@ -3,6 +3,7 @@ package xyz.dead8309.nuvo.core.database.model
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import xyz.dead8309.nuvo.core.model.AuthStatus
 
 @Entity("mcp_servers")
 data class McpServerEntity(
@@ -16,4 +17,13 @@ data class McpServerEntity(
     val headers: Map<String, String>,
     @ColumnInfo("enabled", defaultValue = "0")
     val enabled: Boolean,
+
+    @ColumnInfo("requires_auth", defaultValue = "0")
+    val requiresAuth: Boolean = false,
+    @ColumnInfo("auth_status")
+    val authStatus: AuthStatus = AuthStatus.NOT_CHECKED,
+    @ColumnInfo("auth_server_metadata_url", defaultValue = "NULL")
+    val authorizationServerMetadataUrl: String? = null,
+    @ColumnInfo("oauth_client_id", defaultValue = "NULL")
+    val oauthClientId: String? = null,
 )

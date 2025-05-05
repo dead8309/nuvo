@@ -2,7 +2,10 @@ package xyz.dead8309.nuvo.data.remote.mcp.client
 
 import android.util.Log
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.ResponseException
 import io.ktor.client.request.header
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.modelcontextprotocol.kotlin.sdk.Implementation
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import kotlinx.coroutines.CancellationException
@@ -26,6 +29,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import xyz.dead8309.nuvo.BuildConfig
+import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.McpServer
 import xyz.dead8309.nuvo.data.repository.SettingsRepository
 import xyz.dead8309.nuvo.di.ApplicationScope
@@ -48,6 +52,9 @@ class McpConnectionManagerImpl @Inject constructor(
     @ApplicationScope private val appScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : McpConnectionManager {
+    // NOTE
+    // FUTURE_ME: PLEASE DON'T RENAME THIS, ANDROID STUDIO ALWAYS PLACES IT AT THE TOP OF
+    // COMPLETION LIST
     private val _implementation = Implementation(
         name = BuildConfig.APPLICATION_ID,
         version = BuildConfig.VERSION_NAME
@@ -118,6 +125,38 @@ class McpConnectionManagerImpl @Inject constructor(
         val clientId = config.id
         var retryCount = 0
 
+        val serverConfigFromDb = settingsRepository.getMcpServer(clientId)
+            ?: return run {
+                Log.e(TAG, "Server config $clientId not found in DB")
+                null
+            }
+
+        if (serverConfigFromDb.requiresAuth) {
+            val accessToken = settingsRepository.getValidAccessToken(clientId)
+            if (accessToken == null) {
+                Log.w(TAG, "Server $clientId requires auth but no access token found")
+                if (serverConfigFromDb.authStatus != AuthStatus.ERROR) {
+                    settingsRepository.updateAuthStatus(clientId, AuthStatus.REQUIRED_USER_ACTION)
+                }
+                return null
+            }
+            Log.d(TAG, "Valid access token found for server $clientId, connecting..")
+        }
+
+        activeClients[clientId]?.let { existingClient ->
+            if (existingClient.isConnected()) {
+                Log.v(TAG, "Returning existing client for $clientId")
+                return existingClient
+            } else {
+                Log.w(
+                    TAG,
+                    "Existing client found for $clientId but not connected, attempting reconnect."
+                )
+                activeClients.remove(clientId)
+                updateConnectionState(clientId, ConnectionState.DISCONNECTED)
+            }
+        }
+
         while (retryCount < MAX_RETRIES) {
             val currentState = _connectionStates.value[clientId]
             if (currentState == ConnectionState.CONNECTED) {
@@ -151,11 +190,23 @@ class McpConnectionManagerImpl @Inject constructor(
                 try {
                     client = Client(clientInfo = _implementation)
 
+                    val accessTokenForTransport = if (serverConfigFromDb.requiresAuth) {
+                        settingsRepository.getValidAccessToken(clientId) ?: run {
+                            throw IllegalStateException("Auth token required but not found")
+                        }
+                    } else {
+                        null
+                    }
+
                     val transport = CustomSSEClientTransport(
                         client = httpClient,
                         urlString = config.url
                     ) {
                         config.headers.forEach { (k, v) -> header(k, v) }
+                        accessTokenForTransport?.let {
+                            header(HttpHeaders.Authorization, "Bearer $it")
+                            Log.v(TAG, "Added auth header for $clientId")
+                        }
                     }
 
                     withTimeout(CONNECT_TIMEOUT) {
@@ -168,8 +219,8 @@ class McpConnectionManagerImpl @Inject constructor(
                         TAG,
                         "Successfully connected client for ${config.id}. Server ${client.serverVersion}"
                     )
-
                     clientEventJobs[clientId] = launch { handleClientEvents(client, clientId) }
+
                 } catch (e: CancellationException) {
                     Log.w(TAG, "Connection attempt cancelled for $clientId", e)
                     updateConnectionState(clientId, ConnectionState.DISCONNECTED)
@@ -178,6 +229,15 @@ class McpConnectionManagerImpl @Inject constructor(
                     Log.e(TAG, "Connection attempt failed for $clientId", e)
                     updateConnectionState(clientId, ConnectionState.FAILED)
                     client?.closeQuietly(clientId)
+
+                    if (e is ResponseException && e.response.status == HttpStatusCode.Unauthorized) {
+                        Log.w(TAG, "Connection failed with 401. token might be invalid")
+                        // NOTE: needs re-auth
+                        settingsRepository.updateAuthStatus(
+                            clientId,
+                            AuthStatus.REQUIRED_USER_ACTION
+                        )
+                    }
                 } finally {
                     connectionJobs.remove(clientId)
                     Log.d(TAG, "Connection job finished for $clientId")
@@ -231,7 +291,7 @@ class McpConnectionManagerImpl @Inject constructor(
                             Log.d(TAG, "Event listener scope cancelled for $clientId")
                         }
                     }
-                } catch (e: CancellationException) {
+                } catch (_: CancellationException) {
                     Log.d(TAG, "Event listener scope cancelled for $clientId")
                 }
             }

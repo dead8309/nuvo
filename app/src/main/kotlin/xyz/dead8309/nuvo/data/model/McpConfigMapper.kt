@@ -9,15 +9,23 @@ fun McpServerEntity.asDomainModel(): McpServer {
         name = this.name,
         url = this.url,
         headers = this.headers,
-        enabled = this.enabled
+        enabled = this.enabled,
+        requiresAuth = this.requiresAuth,
+        authStatus = authStatus,
+        authorizationServerMetadataUrl = this.authorizationServerMetadataUrl
     )
 }
 
-fun McpServer.asEntity(): McpServerEntity {
+fun McpServer.asEntity(currentEntity: McpServerEntity? = null): McpServerEntity {
     return McpServerEntity(
         name = this.name,
         url = this.url,
         headers = this.headers,
-        enabled = this.enabled
+        enabled = this.enabled,
+        requiresAuth = this.requiresAuth,
+        authStatus = this.authStatus,
+        authorizationServerMetadataUrl = this.authorizationServerMetadataUrl,
+        // Only update clientId if it's part of the model being saved,
+        oauthClientId = currentEntity?.oauthClientId
     )
 }

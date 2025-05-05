@@ -28,7 +28,7 @@ class CustomSSEClientTransport(
     private val reconnectionTime: Duration? = null,
     private val requestBuilder: HttpRequestBuilder.() -> Unit = {},
 ) : AbstractTransport() {
-   private val McpJson = Json {
+   private val mcpJson = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
         isLenient = true
@@ -99,7 +99,7 @@ class CustomSSEClientTransport(
 
                     else -> {
                         try {
-                            val message = McpJson.decodeFromString<JSONRPCMessage>(event.data ?: "")
+                            val message = mcpJson.decodeFromString<JSONRPCMessage>(event.data ?: "")
                             _onMessage(message)
                         } catch (e: Exception) {
                             _onError(e)
@@ -121,7 +121,8 @@ class CustomSSEClientTransport(
         try {
             val response = client.post(endpoint.getCompleted()) {
                 headers.append(HttpHeaders.ContentType, ContentType.Application.Json)
-                setBody(McpJson.encodeToString(message))
+                requestBuilder()
+                setBody(mcpJson.encodeToString(message))
             }
 
             if (!response.status.isSuccess()) {

@@ -112,43 +112,28 @@ class SettingsRepositoryImpl @Inject constructor(
             }
         }
 
+    override suspend fun saveInitialAuthState(serverId: Long, authState: AuthState) {
+        authStateManager.saveAuthState(serverId, authState)
+        Log.d(TAG, "Saved initial AuthState for server $serverId")
+    }
 
     override suspend fun updateAuthStateWithTokenResponse(
         serverId: Long,
         tokenResponse: net.openid.appauth.TokenResponse
     ) {
-        var authState = authStateManager.getAuthState(serverId)
+        var currentAuthState = authStateManager.getAuthState(serverId)
 
-        if (authState == null) {
+        if (currentAuthState == null) {
             Log.e(
                 TAG,
-                "No existing AuthState found for server $serverId. Creating new one."
+                "Cannot update AuthState: Initial AuthState missing for server $serverId"
             )
-            // attempt to create a basic auth state if possible
-            val server = mcpServerDao.getServerById(serverId)
-            val config = server?.authorizationServerMetadataUrl?.let { url ->
-                // Assuming discovery happened and endpoints are stored or discoverable
-                val metadata = oauthService.getAuthorizationServerMetadata(url).getOrNull()
-                metadata?.let {
-                    AuthorizationServiceConfiguration(
-                        Uri.parse(it.authorizationEndpoint),
-                        Uri.parse(it.tokenEndpoint),
-                        it.registrationEndpoint?.let { Uri.parse(it) },
-                    )
-                }
-            }
-            if (config != null) {
-                Log.w(TAG, "Creating new AuthState for server $serverId before update.")
-                authState = AuthState(config)
-            } else {
-                Log.e(TAG, "Cannot create AuthState for server $serverId")
-                updateAuthStatus(serverId, AuthStatus.ERROR)
-                throw IllegalStateException("Cannot update AuthState without valid config")
-            }
+            updateAuthStatus(serverId, AuthStatus.ERROR)
+            throw IllegalStateException("Initial AuthState missing for server $serverId")
         }
 
-        authState.update(tokenResponse, null)
-        authStateManager.saveAuthState(serverId, authState)
+        currentAuthState.update(tokenResponse, null)
+        authStateManager.saveAuthState(serverId, currentAuthState)
         updateAuthStatus(serverId, AuthStatus.AUTHORIZED)
         Log.i(TAG, "Updated and saved AuthState with new tokens for server $serverId")
     }

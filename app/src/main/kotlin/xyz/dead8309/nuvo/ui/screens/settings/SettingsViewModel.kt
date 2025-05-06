@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationResponse
@@ -143,24 +144,37 @@ class SettingsViewModel @Inject constructor(
                     Log.d(TAG, "Got AuthRequestDetails for server $serverId")
 
                     val state = SecureRandom().nextInt(Int.MAX_VALUE).toString()
-                    storeTemporaryStateToServerIdMapping(state, serverId)
+                    val serviceConfig = AuthorizationServiceConfiguration(
+                        details.authorizationEndpointUri,
+                        details.tokenEndpointUri,
+                        details.registrationEndpointUri,
+                    )
 
                     val authRequestBuilder = AuthorizationRequest.Builder(
-                        AuthorizationServiceConfiguration(
-                            details.authorizationEndpointUri,
-                            details.tokenEndpointUri,
-                            details.registrationEndpointUri,
-                        ),
+                        serviceConfig,
                         details.clientId,
                         ResponseTypeValues.CODE,
                         redirectUri,
                     )
                         .setState(state)
                         .setScope(details.scopes?.joinToString(" "))
-
                     val authRequest = authRequestBuilder.build()
-                    val authIntent = appAuthService.getAuthorizationRequestIntent(authRequest)
 
+                    val initialAuthState = AuthState(authRequest.configuration)
+                    try {
+                        settingsRepository.saveInitialAuthState(serverId, initialAuthState)
+                        Log.d(TAG, "Saved initial AuthState for server $serverId")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save initial AuthState for server $serverId", e)
+                        settingsRepository.updateAuthStatus(serverId, AuthStatus.ERROR)
+                        _userMessage.value = "Failed to save initial AuthState"
+                        return@launch
+                    }
+
+                    // state -> serverId
+                    storeTemporaryStateToServerIdMapping(state, serverId)
+
+                    val authIntent = appAuthService.getAuthorizationRequestIntent(authRequest)
                     try {
                         Log.i(
                             TAG,

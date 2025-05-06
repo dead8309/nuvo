@@ -1,6 +1,7 @@
 package xyz.dead8309.nuvo.data.repository
 
 import kotlinx.coroutines.flow.Flow
+import net.openid.appauth.AuthState
 import xyz.dead8309.nuvo.core.model.AppSettings
 import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.McpServer
@@ -43,6 +44,11 @@ interface SettingsRepository {
      * Saves the OAuth client ID obtained via dynamic registration
      */
     suspend fun saveOAuthClientId(serverId: Long, clientId: String)
+
+    /**
+     * Saves the initial AuthState for a server.
+     */
+    suspend fun saveInitialAuthState(serverId: Long, authState: AuthState)
 
     /**
      * Updates the AuthState with the token response from AppAuth

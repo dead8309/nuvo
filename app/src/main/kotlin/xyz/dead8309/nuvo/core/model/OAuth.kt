@@ -83,10 +83,10 @@ data class ClientRegistrationResponse(
 
     // TODO: come back to this
     // Are these actually needed?
-    @SerialName("client_secret")
-    val clientSecret: String? = null,
-    @SerialName("client_secret_expires_at")
-    val clientSecretExpiresAt: Long? = null,
+//    @SerialName("client_secret")
+//    val clientSecret: String? = null,
+//    @SerialName("client_secret_expires_at")
+//    val clientSecretExpiresAt: Long? = null,
 )
 
 @Serializable
@@ -105,7 +105,7 @@ data class TokenResponse(
 
 data class PersistedOAuthDetails(
     val clientId: String,
-    val clientSecret: String?,
+//    val clientSecret: String?,
     val accessToken: String?,
     val refreshToken: String?,
     val tokenExpiryEpochSeconds: Long?,

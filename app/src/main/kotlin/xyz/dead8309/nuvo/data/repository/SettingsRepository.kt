@@ -3,10 +3,8 @@ package xyz.dead8309.nuvo.data.repository
 import kotlinx.coroutines.flow.Flow
 import xyz.dead8309.nuvo.core.model.AppSettings
 import xyz.dead8309.nuvo.core.model.AuthStatus
-import xyz.dead8309.nuvo.core.model.ClientRegistrationRequest
 import xyz.dead8309.nuvo.core.model.McpServer
 import xyz.dead8309.nuvo.core.model.PersistedOAuthDetails
-import xyz.dead8309.nuvo.core.model.TokenResponse
 
 interface SettingsRepository {
     val appSettingsFlow: Flow<AppSettings>
@@ -47,14 +45,17 @@ interface SettingsRepository {
     suspend fun saveOAuthClientId(serverId: Long, clientId: String)
 
     /**
-     * Saves the OAuth client secret
+     * Updates the AuthState with the token response from AppAuth
      */
-    suspend fun saveOAuthClientSecret(serverId: Long, clientSecret: String?)
+    suspend fun updateAuthStateWithTokenResponse(
+        serverId: Long,
+        tokenResponse: net.openid.appauth.TokenResponse
+    )
 
     /**
-     * Saves the obtained OAuth tokens (access and refresh tokens stored securely)
+     * Retrieves the persisted [net.openid.appauth.AuthState] for a server.
      */
-    suspend fun saveOAuthTokens(serverId: Long, tokenResponse: TokenResponse)
+    suspend fun getAuthState(serverId: Long): net.openid.appauth.AuthState?
 
     /**
      * Retrieves the OAuth details for a server
@@ -72,43 +73,6 @@ interface SettingsRepository {
     suspend fun updateAuthStatus(serverId: Long, status: AuthStatus)
 
     /**
-     * Attempts to get a valid access token, refreshing if necessary
-     */
-    suspend fun getValidAccessToken(serverId: Long): String?
-
-    // TODO: REMOVE THIS
-//    /**
-//     * Initiates the OAuth flow.
-//     * 1. Fetches AS metadata
-//     * 2. Performs dynamic registration if needed
-//     * 3. Generates PKCE values & state
-//     * 4. Stores temp PKCE/state values
-//     * 5. Returns the authorization URL to be opened in the browser
-//     * Returns [Result.failure] if any step fails
-//     */
-//    suspend fun initiateAuthorization(
-//        serverId: Long,
-//        redirectUri: String,
-//        clientRegistrationRequest: ClientRegistrationRequest? = null
-//    ): Result<String>
-//
-//    /**
-//     * Handles the callback after user authorization:
-//     * 1. Verifies the state parameter
-//     * 2. Retrieves the stored PKCE
-//     * 3. Exchanges the authorization code for tokens
-//     * 4. Saves the tokens securely
-//     * 5. Cleans up temp PKCE/state values
-//     * Returns [Result.failure] if any step fails
-//     */
-//    suspend fun handleAuthorizationCallback(
-//        serverId: Long,
-//        code: String,
-//        receivedState: String,
-//        redirectUri: String
-//    ): Result<Unit>
-//
-    /**
      * Fetches the necessary details from the Authorization Server to build an
      * Authorization Request using AppAuth. Performs discovery and registration if needed.
      *
@@ -116,23 +80,6 @@ interface SettingsRepository {
      * @return A [Result] containing AuthRequestDetails on success, or an Exception on failure.
      */
     suspend fun getAuthorizationRequestDetails(serverId: Long): Result<AuthRequestDetails>
-
-    /**
-     * Handles the callback after user authorization, exchanging the code for tokens.
-     *
-     * @param serverId The ID of the MCP server being authorized.
-     * @param code The authorization code received from the server.
-     * @param codeVerifier The PKCE code verifier used in the initial request.
-     * @param redirectUri The redirect URI used in the initial request.
-     * @return A [Result] indicating success or failure of the token exchange and storage.
-     */
-    suspend fun handleAuthorizationCodeExchange(
-        serverId: Long,
-        code: String,
-        codeVerifier: String, // Pass the verifier from AppAuth flow manager
-        redirectUri: String,
-    ): Result<Unit>
-
 
     /**
      * Updates the 'requiresAuth' flag for a server, usually based on discovery

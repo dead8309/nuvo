@@ -22,16 +22,15 @@ import kotlinx.coroutines.withContext
 import xyz.dead8309.nuvo.core.model.AuthorizationServerMetadata
 import xyz.dead8309.nuvo.core.model.ClientRegistrationRequest
 import xyz.dead8309.nuvo.core.model.ClientRegistrationResponse
-import xyz.dead8309.nuvo.core.model.TokenResponse
 import xyz.dead8309.nuvo.di.IoDispatcher
 import javax.inject.Inject
 
 private const val TAG = "AuthorizationServiceImpl"
 
-class AuthorizationServiceImpl @Inject constructor(
+class OAuthServiceImpl @Inject constructor(
     private val httpClient: HttpClient,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
-) : AuthorizationService {
+) : OAuthService {
     private suspend inline fun <reified T> safeGet(url: String): Result<T> =
         runCatching {
             withContext(ioDispatcher) {
@@ -141,46 +140,6 @@ class AuthorizationServiceImpl @Inject constructor(
             requestBody = request,
             // As per RFC7591
             expectedStatus = HttpStatusCode.Created,
-        )
-    }
-
-    override suspend fun exchangeCodeForToken(
-        tokenEndpoint: String,
-        clientId: String,
-        clientSecret: String?,
-        code: String,
-        redirectUri: String,
-        codeVerifier: String
-    ): Result<TokenResponse> {
-        Log.d(TAG, "Exchanging authorization code for token at: $tokenEndpoint")
-        return safeSubmitForm(
-            url = tokenEndpoint,
-            formParams = Parameters.build {
-                append("grant_type", "authorization_code")
-                append("code", code)
-                append("redirect_uri", redirectUri)
-                append("client_id", clientId)
-                clientSecret?.let { append("client_secret", it) }
-                append("code_verifier", codeVerifier)
-            }
-        )
-    }
-
-    override suspend fun refreshAccessToken(
-        tokenEndpoint: String,
-        clientId: String,
-        clientSecret: String?,
-        refreshToken: String
-    ): Result<TokenResponse> {
-        Log.d(TAG, "Refreshing access token at: $tokenEndpoint")
-        return safeSubmitForm(
-            url = tokenEndpoint,
-            formParams = Parameters.build {
-                append("grant_type", "refresh_token")
-                append("refresh_token", refreshToken)
-                append("client_id", clientId)
-                clientSecret?.let { append("client_secret", it) }
-            }
         )
     }
 }

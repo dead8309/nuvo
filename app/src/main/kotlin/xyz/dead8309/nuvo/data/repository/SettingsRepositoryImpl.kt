@@ -122,7 +122,7 @@ class SettingsRepositoryImpl @Inject constructor(
         if (authState == null) {
             Log.e(
                 TAG,
-                "Cannot update AuthState with tokens: No existing AuthState found for server $serverId"
+                "No existing AuthState found for server $serverId. Creating new one."
             )
             // attempt to create a basic auth state if possible
             val server = mcpServerDao.getServerById(serverId)
@@ -278,15 +278,48 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun setRequiresAuth(serverId: Long, requiresAuth: Boolean): Unit =
         withContext(ioDispatcher) {
-            mcpServerDao.getServerById(serverId)?.let {
-                mcpServerDao.upsertServer(it.copy(requiresAuth = requiresAuth))
-                if (!requiresAuth) {
-                    clearOAuthDetails(serverId)
-                    updateAuthStatus(serverId, AuthStatus.NOT_REQUIRED)
-                } else if (it.authStatus == AuthStatus.NOT_REQUIRED || it.authStatus == AuthStatus.NOT_CHECKED) {
-                    updateAuthStatus(serverId, AuthStatus.NOT_CHECKED)
+            val currentServer = mcpServerDao.getServerById(serverId)
+
+            if (currentServer == null) {
+                Log.w(TAG, "setRequiresAuth: Server not found $serverId")
+                return@withContext
+            }
+
+            if (currentServer.requiresAuth != requiresAuth) {
+                Log.d(
+                    TAG,
+                    "Setting requiresAuth=$requiresAuth for server $serverId, was ${currentServer.requiresAuth}"
+                )
+
+                val newAuthStatus = when {
+                    !requiresAuth -> {
+                        Log.d(TAG, "Server no longer requires auth")
+                        clearOAuthDetails(serverId)
+                        AuthStatus.NOT_REQUIRED
+                    }
+
+                    requiresAuth -> {
+                        Log.d(TAG, "Server now requires auth")
+                        AuthStatus.REQUIRED_USER_ACTION
+                    }
+
+                    else -> currentServer.authStatus
                 }
-            } ?: Log.w(TAG, "setRequiresAuth: Server not found $serverId")
+
+                mcpServerDao.upsertServer(
+                    currentServer.copy(
+                        requiresAuth = requiresAuth,
+                        authStatus = newAuthStatus
+                    )
+                )
+                Log.d(
+                    TAG,
+                    "Updated server $serverId: requiresAuth: $requiresAuth, authStatus: $newAuthStatus"
+                )
+
+            } else {
+                Log.d(TAG, "No change in requiresAuth for server $serverId, skipping update")
+            }
         }
 
     override suspend fun performInitialAuthDiscovery(serverId: Long): Result<AuthStatus> =
@@ -305,13 +338,10 @@ class SettingsRepositoryImpl @Inject constructor(
                 Log.d(TAG, "Performing initial auth discovery for server $serverId")
                 updateAuthStatus(serverId, AuthStatus.REQUIRED_DISCOVERY)
 
-                val baseServerUrl = server.url
-                val normalizedPath = (Uri.parse(baseServerUrl).path
-                    ?: "").removeSuffix("/") + "/.well-known/oauth-authorization-server"
                 val directAsMetadataUrl = try {
-                    Uri.parse(baseServerUrl)
+                    Uri.parse(server.url)
                         .buildUpon()
-                        .path(normalizedPath)
+                        .path("/.well-known/oauth-authorization-server")
                         .clearQuery()
                         .build()
                         .toString()

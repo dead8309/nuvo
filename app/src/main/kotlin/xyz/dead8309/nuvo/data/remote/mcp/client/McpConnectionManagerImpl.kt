@@ -2,7 +2,7 @@ package xyz.dead8309.nuvo.data.remote.mcp.client
 
 import android.util.Log
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.ResponseException
+import io.ktor.client.plugins.sse.SSEClientException
 import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -198,12 +198,13 @@ class McpConnectionManagerImpl @Inject constructor(
             var attemptClient: Client? = null
             var connectJob = Job()
             connectionJobs[clientServerId] = connectJob
+            var attemptRequiresAuth = config.requiresAuth
 
             try {
                 var accessTokenForTransport: String? = null
                 var authStateToPersist: AuthState? = null
 
-                if (config.requiresAuth) {
+                if (attemptRequiresAuth) {
                     val authState = authStateManager.getAuthState(clientServerId)
                     if (authState == null || !authState.isAuthorized) {
                         Log.w(
@@ -279,8 +280,9 @@ class McpConnectionManagerImpl @Inject constructor(
 
                 Log.d(
                     TAG,
-                    "Proceeding to connect client for $clientServerId, AuthRequired: ${config.requiresAuth}"
+                    "Proceeding to connect client for $clientServerId, AuthRequired: $attemptRequiresAuth"
                 )
+                updateConnectionState(clientServerId, ConnectionState.CONNECTING)
                 attemptClient = Client(clientInfo = _implementation)
 
                 val transport = CustomSSEClientTransport(
@@ -358,19 +360,51 @@ class McpConnectionManagerImpl @Inject constructor(
                 )
                 attemptClient?.closeQuietly(clientServerId)
 
-                if (e is ResponseException && e.response.status == HttpStatusCode.Unauthorized) {
+                if (e is SSEClientException && e.response?.status == HttpStatusCode.Unauthorized) {
                     Log.w(
                         TAG,
                         "Connection failed with 401. token might be invalid"
                     )
-                    // NOTE: needs re-auth
-                    settingsRepository.updateAuthStatus(
-                        clientServerId,
-                        AuthStatus.REQUIRED_USER_ACTION
-                    )
-                    authStateManager.clearAuthState(clientServerId)
-                } else if (config.requiresAuth && config.authStatus != AuthStatus.REQUIRED_USER_ACTION) {
-                    settingsRepository.updateAuthStatus(clientServerId, AuthStatus.ERROR)
+
+                    if (!attemptRequiresAuth) {
+                        Log.i(TAG, "Auth required for $clientServerId, updating config.")
+                        settingsRepository.setRequiresAuth(clientServerId, true)
+                        settingsRepository.updateAuthStatus(
+                            clientServerId,
+                            AuthStatus.REQUIRED_USER_ACTION
+                        )
+
+                        appScope.launch {
+                            Log.d(TAG, "Triggering discovery for $clientServerId after 401")
+                            settingsRepository.performInitialAuthDiscovery(clientServerId)
+                                .onFailure { discoveryError ->
+                                    Log.e(
+                                        TAG,
+                                        "Discovery failed for $clientServerId",
+                                        discoveryError
+                                    )
+                                }
+                        }
+                    } else {
+                        // NOTE: needs re-auth
+                        settingsRepository.updateAuthStatus(
+                            clientServerId,
+                            AuthStatus.REQUIRED_USER_ACTION
+                        )
+                        authStateManager.clearAuthState(clientServerId)
+                    }
+
+                    updateConnectionState(clientServerId, ConnectionState.FAILED)
+                    connectionJobs.remove(clientServerId)
+                    // NOTE: Do not retry after getting 401
+                    // EXIT the function
+                    return null
+
+                } else {
+                    updateConnectionState(clientServerId, ConnectionState.FAILED)
+                    if (attemptRequiresAuth) {
+                        settingsRepository.updateAuthStatus(clientServerId, AuthStatus.ERROR)
+                    }
                 }
             } finally {
                 if (connectionJobs[clientServerId] == connectJob) {

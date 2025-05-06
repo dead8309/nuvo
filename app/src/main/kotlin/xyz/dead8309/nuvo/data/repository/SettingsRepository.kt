@@ -1,8 +1,11 @@
 package xyz.dead8309.nuvo.data.repository
 
 import kotlinx.coroutines.flow.Flow
+import net.openid.appauth.AuthState
 import xyz.dead8309.nuvo.core.model.AppSettings
+import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.McpServer
+import xyz.dead8309.nuvo.core.model.PersistedOAuthDetails
 
 interface SettingsRepository {
     val appSettingsFlow: Flow<AppSettings>
@@ -13,11 +16,14 @@ interface SettingsRepository {
     /** Flow of all MCP servers sorted by name. */
     fun getAllMcpServers(): Flow<List<McpServer>>
 
+    /** Gets a MCP server by its unique ID. */
+    suspend fun getMcpServer(id: Long): McpServer?
+
     /**
      * Saves (inserts or updates) an MCP server configuration.
      * The `config.id` should be unique for identification.
      */
-    suspend fun saveMcpSever(config: McpServer)
+    suspend fun saveMcpSever(config: McpServer): Long
 
     /**
      * Enables or disables a specific MCP server configuration.
@@ -28,4 +34,77 @@ interface SettingsRepository {
      * Deletes an MCP server configuration by its unique ID.
      */
     suspend fun deleteMcpServer(id: Long)
+
+    /**
+     * Saves discovered Authorization Server metadata URL.
+     */
+    suspend fun saveAuthorizationServerMetadataUrl(serverId: Long, url: String?)
+
+    /**
+     * Saves the OAuth client ID obtained via dynamic registration
+     */
+    suspend fun saveOAuthClientId(serverId: Long, clientId: String)
+
+    /**
+     * Saves the initial AuthState for a server.
+     */
+    suspend fun saveInitialAuthState(serverId: Long, authState: AuthState)
+
+    /**
+     * Updates the AuthState with the token response from AppAuth
+     */
+    suspend fun updateAuthStateWithTokenResponse(
+        serverId: Long,
+        tokenResponse: net.openid.appauth.TokenResponse
+    )
+
+    /**
+     * Retrieves the persisted [net.openid.appauth.AuthState] for a server.
+     */
+    suspend fun getAuthState(serverId: Long): net.openid.appauth.AuthState?
+
+    /**
+     * Retrieves the OAuth details for a server
+     */
+    suspend fun getPersistedOAuthDetails(serverId: Long): PersistedOAuthDetails?
+
+    /**
+     * Clears all OAuth tokens and credentials for a server
+     */
+    suspend fun clearOAuthDetails(serverId: Long)
+
+    /**
+     * Updates the authorization status of a server
+     */
+    suspend fun updateAuthStatus(serverId: Long, status: AuthStatus)
+
+    /**
+     * Fetches the necessary details from the Authorization Server to build an
+     * Authorization Request using AppAuth. Performs discovery and registration if needed.
+     *
+     * @param serverId The ID of the MCP server.
+     * @return A [Result] containing AuthRequestDetails on success, or an Exception on failure.
+     */
+    suspend fun getAuthorizationRequestDetails(serverId: Long): Result<AuthRequestDetails>
+
+    /**
+     * Updates the 'requiresAuth' flag for a server, usually based on discovery
+     */
+    suspend fun setRequiresAuth(serverId: Long, requiresAuth: Boolean)
+
+    /**
+     * Performs the initial discovery step for a server to check if auth is needed and get metadata URL
+     */
+    suspend fun performInitialAuthDiscovery(serverId: Long): Result<AuthStatus>
 }
+
+/**
+ * information needed by AppAuth to build an AuthorizationRequest.
+ */
+data class AuthRequestDetails(
+    val authorizationEndpointUri: android.net.Uri,
+    val tokenEndpointUri: android.net.Uri,
+    val registrationEndpointUri: android.net.Uri?,
+    val clientId: String,
+    val scopes: List<String>?, // null if not specified/needed
+)

@@ -5,6 +5,7 @@ import androidx.room.ProvidedTypeConverter
 import androidx.room.TypeConverter
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
+import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.ChatMessage
 import javax.inject.Inject
 
@@ -106,6 +107,19 @@ class McpServerHeadersConverter @Inject constructor(private val json: Json) {
 
     @TypeConverter
     fun fromJson(jsonString: String): Map<String, String> {
+        return json.decodeFromString(jsonString)
+    }
+}
+
+@ProvidedTypeConverter
+class McpServerAuthStatusConverter @Inject constructor(private val json: Json) {
+    @TypeConverter
+    fun toJson(authStatus: AuthStatus): String {
+        return json.encodeToString(authStatus)
+    }
+
+    @TypeConverter
+    fun fromJson(jsonString: String): AuthStatus {
         return json.decodeFromString(jsonString)
     }
 }

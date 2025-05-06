@@ -7,4 +7,5 @@ import xyz.dead8309.nuvo.core.model.McpServer
 data class SettingsUiState(
     val openAiApiKey: String = "",
     val mcpServers: List<McpServer> = emptyList(),
+    val userMessage: String? = null,
 )

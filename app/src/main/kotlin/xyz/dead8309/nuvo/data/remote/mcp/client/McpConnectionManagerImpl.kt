@@ -2,7 +2,10 @@ package xyz.dead8309.nuvo.data.remote.mcp.client
 
 import android.util.Log
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.sse.SSEClientException
 import io.ktor.client.request.header
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.modelcontextprotocol.kotlin.sdk.Implementation
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import kotlinx.coroutines.CancellationException
@@ -10,6 +13,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,13 +29,20 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import net.openid.appauth.AuthState
+import net.openid.appauth.AuthorizationException
+import net.openid.appauth.AuthorizationService
 import xyz.dead8309.nuvo.BuildConfig
+import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.McpServer
+import xyz.dead8309.nuvo.data.repository.AuthStateManager
 import xyz.dead8309.nuvo.data.repository.SettingsRepository
 import xyz.dead8309.nuvo.di.ApplicationScope
 import xyz.dead8309.nuvo.di.IoDispatcher
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.time.Duration.Companion.seconds
 
 private const val TAG = "McpConnectionManagerImpl"
@@ -43,11 +54,16 @@ private const val MAX_RETRIES = 3
 private const val RETRY_DELAY = 1L
 
 class McpConnectionManagerImpl @Inject constructor(
+    @ApplicationScope private val appScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val settingsRepository: SettingsRepository,
     private val httpClient: HttpClient,
-    @ApplicationScope private val appScope: CoroutineScope,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    private val appAuthService: AuthorizationService,
+    private val authStateManager: AuthStateManager
 ) : McpConnectionManager {
+    // NOTE
+    // FUTURE_ME: PLEASE DON'T RENAME THIS, ANDROID STUDIO ALWAYS PLACES IT AT THE TOP OF
+    // COMPLETION LIST
     private val _implementation = Implementation(
         name = BuildConfig.APPLICATION_ID,
         version = BuildConfig.VERSION_NAME
@@ -115,90 +131,297 @@ class McpConnectionManagerImpl @Inject constructor(
 
 
     private suspend fun getOrConnectClientInternal(config: McpServer): Client? {
-        val clientId = config.id
+        val clientServerId = config.id
         var retryCount = 0
 
+        activeClients[clientServerId]?.let { existingClient ->
+            if (existingClient.isConnected()) {
+                Log.v(TAG, "Returning existing client for $clientServerId")
+                return existingClient
+            } else {
+                Log.w(
+                    TAG,
+                    "Existing client found for $clientServerId but not connected, attempting reconnect."
+                )
+                activeClients.remove(clientServerId)
+                updateConnectionState(clientServerId, ConnectionState.DISCONNECTED)
+            }
+        }
+
         while (retryCount < MAX_RETRIES) {
-            val currentState = _connectionStates.value[clientId]
+            val currentState = _connectionStates.value[clientServerId]
             if (currentState == ConnectionState.CONNECTED) {
-                activeClients[clientId]?.let {
-                    Log.v(TAG, "Returning existing client for $clientId")
+                activeClients[clientServerId]?.let {
+                    Log.v(TAG, "Returning existing client for $clientServerId")
                     return it
                 }
 
-                Log.w(TAG, "State is CONNECTED but client is null for $clientId")
-                updateConnectionState(clientId, ConnectionState.DISCONNECTED)
+                Log.w(TAG, "State is CONNECTED but client is null for $clientServerId")
+                updateConnectionState(clientServerId, ConnectionState.DISCONNECTED)
             }
 
-            connectionJobs[clientId]?.let { existingJob ->
+            connectionJobs[clientServerId]?.let { existingJob ->
                 if (existingJob.isActive) {
-                    Log.d(TAG, "Connection job already exists for $clientId")
-                    existingJob.join()
-                    return activeClients[clientId]?.takeIf { _connectionStates.value[clientId] == ConnectionState.CONNECTED }
+                    Log.d(TAG, "Connection job already exists for $clientServerId")
+                    try {
+                        existingJob.join()
+                        val client = activeClients[clientServerId]
+                        if (client != null && _connectionStates.value[clientServerId] == ConnectionState.CONNECTED) {
+                            Log.d(
+                                TAG,
+                                "Joined active job for $clientServerId, connection successful"
+                            )
+                            return client
+                        } else {
+                            Log.d(
+                                TAG,
+                                "Joined active job for $clientServerId, but connection failed"
+                            )
+                        }
+                    } catch (_: CancellationException) {
+                        Log.w(TAG, "Joined job for $clientServerId was cancelled.")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error joining existing connection job for $clientServerId", e)
+                    }
                 } else {
-                    connectionJobs.remove(clientId)
+                    // cleanup
+                    connectionJobs.remove(clientServerId)
                     Log.d(
                         TAG,
-                        "Previous connection job for $clientId was finished (possibly failed), allowing new request"
+                        "Previous connection job for $clientServerId was finished (possibly failed), allowing new request"
                     )
                 }
             }
-            Log.i(TAG, "Starting new connection job for $clientId")
-            updateConnectionState(clientId, ConnectionState.CONNECTING)
 
-            val connectJob = appScope.launch(ioDispatcher + SupervisorJob()) {
-                var client: Client? = null
-                try {
-                    client = Client(clientInfo = _implementation)
+            Log.i(TAG, "Starting new connection job for $clientServerId")
+            updateConnectionState(clientServerId, ConnectionState.CONNECTING)
+            var attemptClient: Client? = null
+            var connectJob = Job()
+            connectionJobs[clientServerId] = connectJob
+            var attemptRequiresAuth = config.requiresAuth
 
-                    val transport = CustomSSEClientTransport(
-                        client = httpClient,
-                        urlString = config.url
-                    ) {
-                        config.headers.forEach { (k, v) -> header(k, v) }
+            try {
+                var accessTokenForTransport: String? = null
+                var authStateToPersist: AuthState? = null
+
+                if (attemptRequiresAuth) {
+                    val authState = authStateManager.getAuthState(clientServerId)
+                    if (authState == null || !authState.isAuthorized) {
+                        Log.w(
+                            TAG,
+                            "Server $clientServerId requires auth but not authorized. Current: ${config.authStatus}"
+                        )
+
+                        if (config.authStatus != AuthStatus.ERROR && config.authStatus != AuthStatus.REQUIRED_DISCOVERY && config.authStatus != AuthStatus.REQUIRED_AWAITING_CALLBACK) {
+                            settingsRepository.updateAuthStatus(
+                                clientServerId,
+                                AuthStatus.REQUIRED_USER_ACTION
+                            )
+                        }
+                        updateConnectionState(clientServerId, ConnectionState.FAILED)
+                        connectionJobs.remove(clientServerId)
+                        return null
                     }
 
-                    withTimeout(CONNECT_TIMEOUT) {
-                        client.connect(transport = transport)
+                    Log.d(TAG, "Attempting to get fresh token for $clientServerId...")
+                    try {
+                        accessTokenForTransport = suspendCancellableCoroutine { continuation ->
+                            authState.performActionWithFreshTokens(appAuthService) { accessToken, _, ex ->
+                                if (ex != null) {
+                                    Log.e(
+                                        TAG,
+                                        "Failed to get fresh token for $clientServerId",
+                                        ex
+                                    )
+                                    val newStatus = when (ex.code) {
+                                        AuthorizationException.GeneralErrors.ID_TOKEN_VALIDATION_ERROR.code,
+                                        AuthorizationException.GeneralErrors.ID_TOKEN_PARSING_ERROR.code,
+                                        AuthorizationException.TokenRequestErrors.INVALID_GRANT.code,
+                                        AuthorizationException.TokenRequestErrors.INVALID_CLIENT.code -> AuthStatus.REQUIRED_USER_ACTION
+
+                                        else -> AuthStatus.ERROR
+                                    }
+                                    appScope.launch {
+                                        settingsRepository.updateAuthStatus(
+                                            clientServerId,
+                                            newStatus
+                                        )
+                                    }
+                                    continuation.resumeWithException(ex)
+                                } else if (accessToken == null) {
+                                    Log.e(
+                                        TAG,
+                                        "Fresh token for $clientServerId was null"
+                                    )
+                                    appScope.launch {
+                                        settingsRepository.updateAuthStatus(
+                                            clientServerId,
+                                            AuthStatus.ERROR
+                                        )
+                                    }
+                                    continuation.resumeWithException(IllegalStateException("Null token received"))
+                                } else {
+                                    Log.d(
+                                        TAG,
+                                        "Successfully obtained fresh token for $clientServerId"
+                                    )
+                                    authStateToPersist = authState
+                                    continuation.resume(accessToken)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error during fresh token retrieval for $clientServerId", e)
+                        updateConnectionState(clientServerId, ConnectionState.FAILED)
+                        connectionJobs.remove(clientServerId)
+                        return null
+                    }
+                }
+
+                Log.d(
+                    TAG,
+                    "Proceeding to connect client for $clientServerId, AuthRequired: $attemptRequiresAuth"
+                )
+                updateConnectionState(clientServerId, ConnectionState.CONNECTING)
+                attemptClient = Client(clientInfo = _implementation)
+
+                val transport = CustomSSEClientTransport(
+                    client = httpClient,
+                    urlString = config.url
+                ) {
+                    config.headers.forEach { (k, v) -> header(k, v) }
+
+                    accessTokenForTransport?.let { token ->
+                        header(HttpHeaders.Authorization, "Bearer $token")
+                        Log.v(TAG, "Added auth header for $clientServerId")
+                    }
+                }
+
+                withTimeout(CONNECT_TIMEOUT) {
+                    attemptClient.connect(transport)
+                }
+
+                Log.i(
+                    TAG,
+                    "Successfully connected client for ${config.id}. Server ${attemptClient.serverVersion}"
+                )
+                activeClients[clientServerId] = attemptClient
+                updateConnectionState(
+                    clientServerId,
+                    ConnectionState.CONNECTED
+                )
+                clientEventJobs[clientServerId] =
+                    appScope.launch(ioDispatcher + SupervisorJob()) {
+                        handleClientEvents(attemptClient, clientServerId)
                     }
 
-                    activeClients[clientId] = client
-                    updateConnectionState(clientId, ConnectionState.CONNECTED)
-                    Log.i(
+                authStateToPersist?.let {
+                    try {
+                        authStateManager.saveAuthState(clientServerId, it)
+                    } catch (e: Exception) {
+                        Log.e(
+                            TAG,
+                            "Failed to save updated authstate for $clientServerId after connection",
+                            e
+                        )
+                    }
+                }
+
+                connectionJobs.remove(clientServerId)
+                return attemptClient
+            } catch (e: CancellationException) {
+                Log.w(
+                    TAG,
+                    "Connection attempt cancelled for $clientServerId",
+                    e
+                )
+                updateConnectionState(
+                    clientServerId,
+                    ConnectionState.FAILED
+                )
+                attemptClient?.closeQuietly(clientServerId)
+            } catch (e: TimeoutCancellationException) {
+                Log.w(
+                    TAG,
+                    "Connection attempt timed out for $clientServerId (Attempt ${retryCount + 1})",
+                    e
+                )
+                updateConnectionState(clientServerId, ConnectionState.FAILED)
+                attemptClient?.closeQuietly(clientServerId)
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "Connection attempt failed for $clientServerId",
+                    e
+                )
+                updateConnectionState(
+                    clientServerId,
+                    ConnectionState.FAILED
+                )
+                attemptClient?.closeQuietly(clientServerId)
+
+                if (e is SSEClientException && e.response?.status == HttpStatusCode.Unauthorized) {
+                    Log.w(
                         TAG,
-                        "Successfully connected client for ${config.id}. Server ${client.serverVersion}"
+                        "Connection failed with 401. token might be invalid"
                     )
 
-                    clientEventJobs[clientId] = launch { handleClientEvents(client, clientId) }
-                } catch (e: CancellationException) {
-                    Log.w(TAG, "Connection attempt cancelled for $clientId", e)
-                    updateConnectionState(clientId, ConnectionState.DISCONNECTED)
-                    client?.closeQuietly(clientId)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Connection attempt failed for $clientId", e)
-                    updateConnectionState(clientId, ConnectionState.FAILED)
-                    client?.closeQuietly(clientId)
-                } finally {
-                    connectionJobs.remove(clientId)
-                    Log.d(TAG, "Connection job finished for $clientId")
-                }
-            }
-            connectionJobs[clientId] = connectJob
-            connectJob.join()
+                    if (!attemptRequiresAuth) {
+                        Log.i(TAG, "Auth required for $clientServerId, updating config.")
+                        settingsRepository.setRequiresAuth(clientServerId, true)
+                        settingsRepository.updateAuthStatus(
+                            clientServerId,
+                            AuthStatus.REQUIRED_USER_ACTION
+                        )
 
-            val client = activeClients[clientId]
-            if (client != null && _connectionStates.value[clientId] == ConnectionState.CONNECTED) {
-                return client
+                        appScope.launch {
+                            Log.d(TAG, "Triggering discovery for $clientServerId after 401")
+                            settingsRepository.performInitialAuthDiscovery(clientServerId)
+                                .onFailure { discoveryError ->
+                                    Log.e(
+                                        TAG,
+                                        "Discovery failed for $clientServerId",
+                                        discoveryError
+                                    )
+                                }
+                        }
+                    } else {
+                        // NOTE: needs re-auth
+                        settingsRepository.updateAuthStatus(
+                            clientServerId,
+                            AuthStatus.REQUIRED_USER_ACTION
+                        )
+                        authStateManager.clearAuthState(clientServerId)
+                    }
+
+                    updateConnectionState(clientServerId, ConnectionState.FAILED)
+                    connectionJobs.remove(clientServerId)
+                    // NOTE: Do not retry after getting 401
+                    // EXIT the function
+                    return null
+
+                } else {
+                    updateConnectionState(clientServerId, ConnectionState.FAILED)
+                    if (attemptRequiresAuth) {
+                        settingsRepository.updateAuthStatus(clientServerId, AuthStatus.ERROR)
+                    }
+                }
+            } finally {
+                if (connectionJobs[clientServerId] == connectJob) {
+                    connectionJobs.remove(clientServerId)
+                }
+                Log.d(TAG, "Connection job finished for $clientServerId")
             }
 
             retryCount++
             if (retryCount < MAX_RETRIES) {
-                Log.w(TAG, "Retrying connection for $clientId, attempt $retryCount")
+                Log.w(TAG, "Retrying connection for $clientServerId, attempt $retryCount")
                 delay(RETRY_DELAY.seconds)
             }
         }
-        Log.e(TAG, "Failed to connect client for $clientId after $MAX_RETRIES attempts")
-        updateConnectionState(clientId, ConnectionState.FAILED)
+
+        Log.e(TAG, "Failed to connect client for $clientServerId after $MAX_RETRIES attempts.")
+        updateConnectionState(clientServerId, ConnectionState.FAILED) // Final state is FAILED
         return null
     }
 
@@ -231,7 +454,7 @@ class McpConnectionManagerImpl @Inject constructor(
                             Log.d(TAG, "Event listener scope cancelled for $clientId")
                         }
                     }
-                } catch (e: CancellationException) {
+                } catch (_: CancellationException) {
                     Log.d(TAG, "Event listener scope cancelled for $clientId")
                 }
             }

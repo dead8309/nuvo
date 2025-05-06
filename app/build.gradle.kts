@@ -29,6 +29,8 @@ android {
 
         buildConfigField("int", "VERSION_CODE", "$versionCode")
         buildConfigField("String", "VERSION_NAME", "\"$versionName\"")
+
+        manifestPlaceholders["appAuthRedirectScheme"] = "xyz.dead8309.nuvo"
     }
 
     buildTypes {
@@ -153,6 +155,10 @@ dependencies {
 
     // mcp
     implementation(libs.mcp)
+
+    // auth
+    implementation(libs.appauth)
+    implementation(libs.androidx.security.crypto)
 }
 
 ksp {

@@ -8,10 +8,13 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.plugins.sse.SSE
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.json.Json
 import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor
 import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutorImpl
 import xyz.dead8309.nuvo.data.remote.mcp.client.McpConnectionManager
@@ -26,6 +29,7 @@ abstract class McpModuleBinder {
     abstract fun bindMcpConnectionManager(impl: McpConnectionManagerImpl): McpConnectionManager
 
     @Binds
+    @Singleton
     abstract fun bindMcpToolExecutor(impl: McpToolExecutorImpl): McpToolExecutor
 }
 
@@ -35,9 +39,12 @@ object McpClientModuleProvider {
 
     @Provides
     @Singleton
-    fun provideHttpClient(): HttpClient {
+    fun provideHttpClient(networkJson: Json): HttpClient {
         return HttpClient(CIO) {
             install(SSE)
+            install(ContentNegotiation) {
+                json(networkJson)
+            }
             install(Logging) {
                 logger = object : Logger {
                     override fun log(message: String) {

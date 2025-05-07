@@ -1,5 +1,8 @@
 package xyz.dead8309.nuvo.ui.components
 
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -17,6 +20,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -45,6 +51,13 @@ import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.rememberMarkdownState
 import kotlinx.datetime.Clock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import xyz.dead8309.nuvo.PaymentContextPrefs
 import xyz.dead8309.nuvo.core.model.ChatMessage
 import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor.Companion.extractOriginalToolName
 import xyz.dead8309.nuvo.ui.theme.NuvoTheme
@@ -121,7 +134,7 @@ fun ChatMessageItem(
     allMessages: List<ChatMessage>,
     modifier: Modifier = Modifier
 ) {
-
+    LocalContext.current
     val alignment = if (!currentMessage.isFromAi()) Alignment.CenterEnd else Alignment.CenterStart
     val horizontalPadding = if (!currentMessage.isFromAi()) {
         PaddingValues(start = 64.dp, end = 0.dp)
@@ -137,46 +150,117 @@ fun ChatMessageItem(
     ) {
         Box(modifier = Modifier.align(alignment)) {
             when {
-                currentMessage.role == ChatMessage.Role.ASSISTANT && currentMessage.content == null && !currentMessage.toolCalls.isNullOrEmpty()
-                    -> {
+                currentMessage.role == ChatMessage.Role.ASSISTANT && currentMessage.content == null && !currentMessage.toolCalls.isNullOrEmpty() -> {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        currentMessage.toolCalls.forEach { toolCall ->
-                            val toolMessage = allMessages
+                        currentMessage.toolCalls.forEach { aiToolCall ->
+                            val toolResultMessage = allMessages
                                 .filter { it.role == ChatMessage.Role.TOOL }
-                                .lastOrNull { it.toolCallId == toolCall.id }
+                                .lastOrNull { it.toolCallId == aiToolCall.id }
 
-                            val toolCallState = remember(toolCall.id) {
-                                mutableStateOf(
+                            val toolCallState = remember(
+                                aiToolCall.id,
+                                toolResultMessage
+                            ) {
+                                val baseToolName = extractOriginalToolName(aiToolCall.function.name)
+                                val currentSessionIdForThisToolCall = currentMessage.sessionId
+                                Log.d(
+                                    "ChatMessageItem",
+                                    "StateCompute for ${aiToolCall.id}, toolResultMessage: ${toolResultMessage != null}"
+                                )
+
+                                if (toolResultMessage != null) {
+                                    val durationMs =
+                                        (toolResultMessage.timestamp.toEpochMilliseconds() - currentMessage.timestamp.toEpochMilliseconds()).coerceAtLeast(
+                                            0
+                                        )
+                                    val isActualToolSuccess =
+                                        toolResultMessage.toolResult?.isSuccess == true
+                                    val resultJsonForDisplay = toolResultMessage.content ?: "{}"
+
+                                    var isStripeFlow = false
+                                    var extractedStripeUrl: String? = null
+                                    var descriptionForButton: String? = baseToolName
+
+                                    if (isActualToolSuccess && toolResultMessage.content != null) {
+                                        try {
+                                            val rawJsonElement =
+                                                Json.parseToJsonElement(toolResultMessage.content)
+
+                                            val topLevelJsonArray: JsonArray? =
+                                                if (rawJsonElement is JsonPrimitive && rawJsonElement.isString) {
+                                                    try {
+                                                        Json.parseToJsonElement(rawJsonElement.content) as? JsonArray
+                                                    } catch (_: Exception) {
+                                                        null
+                                                    }
+                                                } else {
+                                                    rawJsonElement as? JsonArray
+                                                }
+
+                                            if (topLevelJsonArray != null && topLevelJsonArray.isNotEmpty()) {
+                                                val firstResultObject =
+                                                    topLevelJsonArray[0].jsonObject
+                                                val textContent =
+                                                    firstResultObject["text"]?.jsonPrimitive?.contentOrNull
+
+                                                if (textContent != null) {
+                                                    extractedStripeUrl =
+                                                        extractStripeUrlFromText(textContent)
+                                                    if (extractedStripeUrl != null) {
+                                                        isStripeFlow = true
+                                                        val descCandidate =
+                                                            textContent.substringBefore(
+                                                                extractedStripeUrl
+                                                            )
+                                                                .trim().removeSuffix(":").trim()
+                                                        descriptionForButton =
+                                                            if (descCandidate.isNotEmpty()) descCandidate else baseToolName
+                                                    }
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e(
+                                                "ChatMessageItem",
+                                                "EXCEPTION during overall parsing of TOOL content: ${e.message}"
+                                            )
+                                        }
+                                    }
+
+
                                     ToolCallState(
-                                        toolName = extractOriginalToolName(toolCall.function.name),
-                                        argumentsJson = toolCall.function.argumentsJson,
+                                        toolName = extractOriginalToolName(
+                                            toolResultMessage.name ?: baseToolName
+                                        ),
+                                        argumentsJson = aiToolCall.function.argumentsJson,
+                                        resultJson = resultJsonForDisplay,
+                                        durationMs = durationMs,
+                                        isExecuting = false,
+                                        isSuccess = isActualToolSuccess,
+                                        showStripeButtonFromToolResult = isStripeFlow,
+                                        stripeCheckoutUrlFromToolResult = extractedStripeUrl,
+                                        paymentDescriptionFromToolResult = descriptionForButton,
+                                        originalToolCallId = aiToolCall.id,
+                                        chatSessionId = currentSessionIdForThisToolCall
+                                    )
+                                } else {
+                                    ToolCallState(
+                                        toolName = baseToolName,
+                                        argumentsJson = aiToolCall.function.argumentsJson,
                                         resultJson = "",
                                         durationMs = 0L,
                                         isExecuting = true,
-                                        isSuccess = false
+                                        isSuccess = false,
+                                        originalToolCallId = aiToolCall.id,
+                                        chatSessionId = currentSessionIdForThisToolCall
                                     )
-                                )
+                                }
                             }
-                            if (toolMessage != null) {
-                                val durationMs =
-                                    (toolMessage.timestamp.toEpochMilliseconds() - currentMessage.timestamp.toEpochMilliseconds()).coerceAtLeast(
-                                        0
-                                    )
-                                toolCallState.value = toolCallState.value.copy(
-                                    toolName = extractOriginalToolName(
-                                        toolMessage.name ?: toolCall.function.name
-                                    ),
-                                    argumentsJson = toolCall.function.argumentsJson,
-                                    resultJson = toolMessage.content ?: "{}",
-                                    durationMs = durationMs,
-                                    isExecuting = false,
-                                    isSuccess = toolMessage.toolResult?.isSuccess ?: false
-                                )
-                            }
+
+
                             ToolCallCard(
-                                state = toolCallState.value,
+                                state = toolCallState,
                                 onCardClick = {},
-                                modifier = modifier
+                                modifier = Modifier
                             )
                         }
                     }
@@ -232,121 +316,147 @@ private fun ToolCallCard(
     onCardClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val isError = !state.isExecuting && !state.isSuccess
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(CardDefaults.shape)
-            .clickable {
-                expanded = !expanded
-                onCardClick()
+    val context = LocalContext.current
+
+    if (state.showStripeButtonFromToolResult && state.stripeCheckoutUrlFromToolResult != null) {
+        Button(
+            onClick = {
+                try {
+                    PaymentContextPrefs.savePendingPayment(
+                        context,
+                        state.chatSessionId,
+                        state.originalToolCallId
+                    )
+                    val intent =
+                        Intent(Intent.ACTION_VIEW, Uri.parse(state.stripeCheckoutUrlFromToolResult))
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e(
+                        "ToolCallCard",
+                        "Error launching Stripe URL: ${state.stripeCheckoutUrlFromToolResult}",
+                        e
+                    )
+                }
             },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Icon(
+                imageVector = Icons.Default.Payments,
+                contentDescription = "Pay",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Text("Pay for ${state.toolName}")
+        }
+    } else {
+        var expanded by rememberSaveable(state.originalToolCallId) { mutableStateOf(false) }
+        val isDisplayableError = !state.isExecuting && !state.isSuccess
+
+        Card(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .clip(CardDefaults.shape)
+                .clickable {
+                    if (!state.isExecuting) {
+                        expanded = !expanded
+                    }
+                    onCardClick()
+                },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = state.toolName,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                )
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (state.isExecuting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Text(
-                            text = "${state.durationMs}ms",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
-                        if (isError) {
-                            Icon(
-                                imageVector = Icons.Default.Cancel,
-                                contentDescription = "Completed",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(16.dp)
+                    Text(
+                        text = state.toolName,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (isDisplayableError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (state.isExecuting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                strokeWidth = 2.dp
                             )
                         } else {
+                            Text(
+                                text = "${state.durationMs}ms",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isDisplayableError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
                             Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Completed",
-                                tint = MaterialTheme.colorScheme.primary,
+                                imageVector = if (state.isSuccess) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                                contentDescription = if (state.isSuccess) "Completed" else "Error",
+                                tint = if (state.isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(16.dp)
                             )
-
                         }
                     }
                 }
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = "Arguments",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shape = RoundedCornerShape(4.dp)
-                            )
-                            .padding(8.dp)
-                    ) {
+                AnimatedVisibility(visible = expanded && !state.isExecuting) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            text = state.argumentsJson,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontFamily = FontFamily.Monospace
+                            "Arguments",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-
-                    Text(
-                        text = "Result",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shape = RoundedCornerShape(4.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                state.argumentsJson,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontFamily = FontFamily.Monospace
                             )
-                            .padding(8.dp)
-                    ) {
+                        }
                         Text(
-                            text = state.resultJson,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontFamily = FontFamily.Monospace
+                            "Result",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                state.resultJson,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
             }
         }
     }
 }
+
 
 @Stable
 data class ToolCallState(
@@ -355,5 +465,19 @@ data class ToolCallState(
     val resultJson: String,
     val durationMs: Long,
     val isExecuting: Boolean,
-    val isSuccess: Boolean = false
+    val isSuccess: Boolean = false,
+    val showStripeButtonFromToolResult: Boolean = false,
+    val stripeCheckoutUrlFromToolResult: String? = null,
+    val paymentDescriptionFromToolResult: String? = null,
+    val originalToolCallId: String,
+    val chatSessionId: String,
 )
+
+fun extractStripeUrlFromText(text: String): String? {
+    // unholy regex
+    val specificStripeRegex =
+        """(https?://checkout\.stripe\.com/c/pay/cs_[^#\s]+(?:#\S*)?)""".toRegex()
+
+    val matchResult = specificStripeRegex.find(text)
+    return matchResult?.groups?.get(1)?.value
+}

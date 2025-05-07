@@ -18,11 +18,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import xyz.dead8309.nuvo.core.model.ChatMessage
 import xyz.dead8309.nuvo.core.model.ChatSession
 import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor
@@ -109,6 +113,148 @@ class ChatViewModel @Inject constructor(
                 _aiResponseState.value =
                     AIResponseState.Error("Cannot load chat. Invalid navigation state.")
             }
+        }
+
+        PaymentEventBus.events
+            .onEach { event ->
+                if (_activeSessionId.value == null) {
+                    Log.w(
+                        "ChatViewModel",
+                        "Ignoring payment event, no active session in this ViewModel instance."
+                    )
+                    return@onEach
+                }
+                if (event.originalToolCallId == null) return@onEach
+
+                if (event.originalToolCallId.isBlank()) {
+                    _aiResponseState.value =
+                        AIResponseState.Error("Payment processed, but linking to original request failed.")
+                    return@onEach
+                }
+
+                val messagesForCurrentSession = _messages.value
+                delay(100)
+                val isEventRelevantToThisSession = messagesForCurrentSession.any { msg ->
+                    msg.toolCalls?.any { tc -> tc.id == event.originalToolCallId } == true
+                }
+
+                if (!isEventRelevantToThisSession) {
+                    Log.w(
+                        "ChatViewModel",
+                        "Payment event for toolCallId ${event.originalToolCallId} does not seem to belong to current session ${_activeSessionId.value}. If this is unexpected, check MainActivity navigation and event posting."
+                    )
+                }
+
+
+                if (event.status == "success") {
+                    handleSuccessfulPayment(event.originalToolCallId, event.stripeSessionId)
+                } else {
+                    handleFailedPayment(
+                        event.originalToolCallId,
+                        event.status,
+                        event.stripeSessionId
+                    )
+                }
+            }
+            .catch { e -> Log.e("ChatViewModel", "Error in PaymentEventBus flow", e) }
+            .launchIn(viewModelScope)
+    }
+
+    private fun handleSuccessfulPayment(originalToolCallId: String, stripeSessionId: String?) {
+        val currentSessionId = _activeSessionId.value ?: return
+        Log.i(
+            "ChatViewModel",
+            "Handling successful payment for originalToolCallId: $originalToolCallId in session: $currentSessionId"
+        )
+
+        val originalAssistantMessage =
+            _messages.value.find { msg -> msg.toolCalls?.any { it.id == originalToolCallId } == true }
+        val originalToolName =
+            originalAssistantMessage?.toolCalls?.find { it.id == originalToolCallId }?.function?.name
+                ?: throw IllegalStateException(
+                    "Original assistant message not found for tool call ID: $originalToolCallId"
+                )
+
+        val paymentToolSuccessMessage = ChatMessage(
+            sessionId = currentSessionId,
+            role = ChatMessage.Role.ASSISTANT,
+            content = buildJsonObject {
+                put("payment_status", "successful")
+                stripeSessionId?.let { put("stripe_session_id", it) }
+                put("message", "Payment confirmed by client. Please verify.")
+            }.toString(),
+            timestamp = Clock.System.now(),
+            toolCallId = originalToolCallId,
+            name = originalToolName,
+            toolResult = ChatMessage.ToolResult(
+                isSuccess = true,
+                resultDataJson = buildJsonObject {
+                    stripeSessionId?.let {
+                        put(
+                            "stripe_session_id",
+                            it
+                        )
+                    }
+                }.toString()
+            )
+        )
+
+        viewModelScope.launch {
+            try {
+                chatRepository.saveMessage(paymentToolSuccessMessage)
+                Log.d("ChatViewModel", "Saved 'payment successful' TOOL message. Triggering AI.")
+                delay(150)
+                triggerAiResponse(
+                    _messages.value,
+                    isContinuationAfterPaymentSetup = true
+                )
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun handleFailedPayment(
+        originalToolCallId: String,
+        paymentStatus: String,
+        stripeSessionId: String?
+    ) {
+        val currentSessionId = _activeSessionId.value ?: return
+
+        val originalAssistantMessage =
+            _messages.value.find { msg -> msg.toolCalls?.any { it.id == originalToolCallId } == true }
+        val originalToolName =
+            originalAssistantMessage?.toolCalls?.find { it.id == originalToolCallId }?.function?.name
+                ?: throw IllegalStateException(
+                    "Original assistant message not found for tool call ID: $originalToolCallId"
+                )
+
+        val paymentToolFailureMessage = ChatMessage(
+            sessionId = currentSessionId,
+            role = ChatMessage.Role.TOOL,
+            content = buildJsonObject {
+                put("payment_status", paymentStatus)
+                stripeSessionId?.let { put("stripe_session_id", it) }
+                put("message", "Payment was not completed ($paymentStatus).")
+            }.toString(),
+            timestamp = Clock.System.now(),
+            toolCallId = originalToolCallId,
+            name = originalToolName,
+            toolResult = ChatMessage.ToolResult(
+                isSuccess = false,
+                resultDataJson = buildJsonObject {
+                    put(
+                        "reason",
+                        "Payment $paymentStatus by user."
+                    )
+                }.toString()
+            )
+        )
+        viewModelScope.launch {
+            chatRepository.saveMessage(paymentToolFailureMessage)
+            _aiResponseState.value =
+                AIResponseState.Error("Payment was $paymentStatus.")
+            delay(150)
+            triggerAiResponse(_messages.value, isContinuationAfterPaymentSetup = true)
         }
     }
 
@@ -210,14 +356,17 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun triggerAiResponse(messages: List<ChatMessage>) {
+    private fun triggerAiResponse(
+        messages: List<ChatMessage>,
+        isContinuationAfterPaymentSetup: Boolean = false
+    ) {
         val sessionId = _activeSessionId.value ?: return
         Log.d(
             "ChatViewModel",
             "Triggering AI response for session $sessionId with ${messages.size} messages."
         )
 
-        if (_aiResponseState.value !is AIResponseState.Error) {
+        if (_aiResponseState.value !is AIResponseState.Error || isContinuationAfterPaymentSetup) {
             _aiResponseState.value = AIResponseState.Loading
         }
 
@@ -275,7 +424,7 @@ class ChatViewModel @Inject constructor(
                         }
                     }
                 }
-            } catch (e: CancellationException) {
+            } catch (_: CancellationException) {
                 Log.d("ChatViewModel", "AI response job cancelled for $sessionId")
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Error collecting AI response stream for $sessionId", e)

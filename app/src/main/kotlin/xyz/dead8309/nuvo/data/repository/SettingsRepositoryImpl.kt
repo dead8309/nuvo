@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import net.openid.appauth.AuthState
-import net.openid.appauth.AuthorizationServiceConfiguration
 import xyz.dead8309.nuvo.BuildConfig
 import xyz.dead8309.nuvo.core.database.dao.McpServerDao
 import xyz.dead8309.nuvo.core.datastore.PreferenceDataStore
@@ -121,17 +120,17 @@ class SettingsRepositoryImpl @Inject constructor(
         serverId: Long,
         tokenResponse: net.openid.appauth.TokenResponse
     ) {
-        var currentAuthState = authStateManager.getAuthState(serverId)
-
+        val currentAuthState = authStateManager.getAuthState(serverId)
         if (currentAuthState == null) {
-            Log.e(
-                TAG,
-                "Cannot update AuthState: Initial AuthState missing for server $serverId"
-            )
+            Log.e(TAG, "Cannot update AuthState for server $serverId, no existing AuthState found")
             updateAuthStatus(serverId, AuthStatus.ERROR)
-            throw IllegalStateException("Initial AuthState missing for server $serverId")
+            throw IllegalStateException("AuthState not found for server $serverId")
         }
 
+        Log.d(
+            TAG,
+            "Updating AuthState for server $serverId with new TokenResponse. LastAuthResponse present: ${currentAuthState.lastAuthorizationResponse != null}"
+        )
         currentAuthState.update(tokenResponse, null)
         authStateManager.saveAuthState(serverId, currentAuthState)
         updateAuthStatus(serverId, AuthStatus.AUTHORIZED)
@@ -349,7 +348,6 @@ class SettingsRepositoryImpl @Inject constructor(
                         Log.i(TAG, "Direct AS metadata discovery successful for server $serverId")
                         authRequired = true
                         metadataUrlToSave = directAsMetadataUrl
-                        finalStatus = AuthStatus.REQUIRED_NOT_AUTHORIZED
 
                         val existingAuthState = authStateManager.getAuthState(serverId)
                         finalStatus = if (existingAuthState?.isAuthorized == true) {

@@ -3,6 +3,7 @@ package xyz.dead8309.nuvo.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -50,22 +51,29 @@ class AuthStateManagerImpl @Inject constructor(
             return@withContext null
         }
 
-        return@withContext try {
-            AuthState.jsonDeserialize(jsonString)
+        try {
+            val authState = AuthState.jsonDeserialize(jsonString)
+            Log.d(
+                TAG,
+                "Loaded AuthState for server $serverId. LastAuthResponse present: ${authState.lastAuthorizationResponse != null}, NeedsRefresh: ${authState.needsTokenRefresh}, IsAuthorized: ${authState.isAuthorized}"
+            )
+            return@withContext authState
         } catch (e: org.json.JSONException) {
             Log.e(TAG, "Failed to deserialize AuthState for server ID: $serverId", e)
             clearAuthState(serverId)
-            null
+            return@withContext null
         } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error while deserializing AuthState for server ID: $serverId", e)
-            null
+            Log.e(TAG, "Unexpected error while loading AuthState for server ID: $serverId", e)
+            return@withContext null
         }
     }
 
     override suspend fun saveAuthState(serverId: Long, authState: AuthState) {
         val key = "$KEY_AUTH_STATE_PREFIX$serverId"
         val jsonString = authState.jsonSerializeString()
-        secureAuthStatePrefs.edit().putString(key, jsonString).apply()
+        secureAuthStatePrefs.edit {
+            putString(key, jsonString)
+        }
         Log.d(
             TAG,
             "Saved AuthState for server ID: $serverId. Needs refresh: ${authState.needsTokenRefresh}"
@@ -74,7 +82,7 @@ class AuthStateManagerImpl @Inject constructor(
 
     override suspend fun clearAuthState(serverId: Long) {
         val key = "$KEY_AUTH_STATE_PREFIX$serverId"
-        secureAuthStatePrefs.edit().remove(key).apply()
+        secureAuthStatePrefs.edit { remove(key) }
         Log.d(TAG, "Cleared AuthState for server ID: $serverId")
     }
 }

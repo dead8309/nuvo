@@ -4,8 +4,8 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
 import android.util.Log
+import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -136,7 +136,7 @@ class SettingsViewModel @Inject constructor(
 
     fun prepareAuthorizationIntent(serverId: Long) {
         viewModelScope.launch {
-            val redirectUri = Uri.parse(OAuthService.REDIRECT_URI)
+            val redirectUri = OAuthService.REDIRECT_URI.toUri()
             settingsRepository.updateAuthStatus(serverId, AuthStatus.REQUIRED_DISCOVERY)
             val detailsResult = settingsRepository.getAuthorizationRequestDetails(serverId)
             detailsResult.fold(
@@ -160,7 +160,7 @@ class SettingsViewModel @Inject constructor(
                         .setScope(details.scopes?.joinToString(" "))
                     val authRequest = authRequestBuilder.build()
 
-                    val initialAuthState = AuthState(authRequest.configuration)
+                    val initialAuthState = AuthState(serviceConfig)
                     try {
                         settingsRepository.saveInitialAuthState(serverId, initialAuthState)
                         Log.d(TAG, "Saved initial AuthState for server $serverId")
@@ -229,14 +229,17 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
 
-            if (receivedServerId != null && receivedServerId != serverId) {
-                Log.e(
-                    TAG,
-                    "State-ServerId mapping mismatch! Received $receivedServerId, Mapped $serverId for state $state."
-                )
+            val authState = settingsRepository.getAuthState(serverId)
+            if (authState == null) {
+                Log.e(TAG, "AuthState missing for server $serverId")
+                settingsRepository.updateAuthStatus(serverId, AuthStatus.ERROR)
+                _userMessage.value = "Internal auth state error"
+                return@launch
             }
 
-            if (error != null && error.error == null) {
+            authState.update(response, error)
+
+            if (error != null) {
                 Log.e(
                     TAG,
                     "Auth failed for server $receivedServerId. Error: ${error.error}",
@@ -251,6 +254,7 @@ class SettingsViewModel @Inject constructor(
                     else -> AuthStatus.ERROR
                 }
                 settingsRepository.updateAuthStatus(serverId, finalStatus)
+                settingsRepository.saveInitialAuthState(serverId, authState)
                 _userMessage.value = "Auth failed: ${error.errorDescription ?: error.error}"
                 return@launch
             }
@@ -261,6 +265,7 @@ class SettingsViewModel @Inject constructor(
                     "Auth callback successful for server $receivedServerId, exchanging code..."
                 )
                 settingsRepository.updateAuthStatus(serverId, AuthStatus.REQUIRED_TOKEN_EXCHANGE)
+                settingsRepository.saveInitialAuthState(serverId, authState)
 
                 try {
                     val tokenRequest = response.createTokenExchangeRequest()
@@ -310,10 +315,12 @@ class SettingsViewModel @Inject constructor(
             } else {
                 Log.e(
                     TAG,
-                    "Auth callback successful but missing authorization code for server $serverId (State: $state)"
+                    "Auth callback for server $serverId - no error, but no auth code in response."
                 )
                 settingsRepository.updateAuthStatus(serverId, AuthStatus.ERROR)
-                _userMessage.value = "Auth Error: Missing authorization code in callback"
+                // Save state even if no code
+                settingsRepository.saveInitialAuthState(serverId, authState)
+                _userMessage.value = "Auth flow did not return an authorization code."
             }
         }
     }

@@ -1,6 +1,6 @@
 [versions]
 ### PROJECT ###
-agp = "8.9.0-alpha07"
+agp = "8.10.0"
 appauth = "0.11.1"
 kotlin = "2.1.20"
 ksp = "2.1.20-2.0.0"

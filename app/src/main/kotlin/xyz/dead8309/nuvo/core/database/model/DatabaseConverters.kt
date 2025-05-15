@@ -3,18 +3,21 @@ package xyz.dead8309.nuvo.core.database.model
 import android.util.Log
 import androidx.room.ProvidedTypeConverter
 import androidx.room.TypeConverter
+import io.modelcontextprotocol.kotlin.sdk.Tool
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
 import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.ChatMessage
 import javax.inject.Inject
 
+private const val TAG = "DatabaseConverters"
 
 /**
- * Room TypeConverter for kotlinx.datetime.Instant <-> Long (Epoch Milliseconds).
+ * Room TypeConverters for various types used in the database.
  */
 @ProvidedTypeConverter
-class InstantConverter @Inject constructor() {
+class DatabaseConverters @Inject constructor(private val json: Json) {
+    // Instant <-> Long
     @TypeConverter
     fun longToInstant(value: Long?): Instant? {
         return value?.let(Instant::fromEpochMilliseconds)
@@ -24,22 +27,11 @@ class InstantConverter @Inject constructor() {
     fun instantToLong(instant: Instant?): Long? {
         return instant?.toEpochMilliseconds()
     }
-}
 
-
-/**
- * Room TypeConverter for List<ChatMessage.ToolCall> <-> JSON String.
- * Requires a Json instance provided via Hilt (using @ProvidedTypeConverter).
- */
-@ProvidedTypeConverter
-class ToolCallListConverter @Inject constructor(private val json: Json) {
-    private val TAG = "ToolCallListConverter"
-
+    // List<ChatMessage.ToolCall> <-> JSON String
     @TypeConverter
-    fun fromJson(jsonString: String?): List<ChatMessage.ToolCall>? {
-        if (jsonString.isNullOrBlank()) {
-            return null
-        }
+    fun toolCallListFromJson(jsonString: String?): List<ChatMessage.ToolCall>? {
+        if (jsonString.isNullOrBlank()) return null
         return try {
             json.decodeFromString<List<ChatMessage.ToolCall>>(jsonString)
         } catch (e: Exception) {
@@ -49,10 +41,8 @@ class ToolCallListConverter @Inject constructor(private val json: Json) {
     }
 
     @TypeConverter
-    fun toJson(toolCalls: List<ChatMessage.ToolCall>?): String? {
-        if (toolCalls.isNullOrEmpty()) {
-            return null
-        }
+    fun toolCallListToJson(toolCalls: List<ChatMessage.ToolCall>?): String? {
+        if (toolCalls.isNullOrEmpty()) return null
         return try {
             json.encodeToString(toolCalls)
         } catch (e: Exception) {
@@ -60,22 +50,11 @@ class ToolCallListConverter @Inject constructor(private val json: Json) {
             null
         }
     }
-}
 
-
-/**
- * Room TypeConverter for ChatMessage.ToolResult <-> JSON String.
- * Requires a Json instance provided via Hilt (using @ProvidedTypeConverter).
- */
-@ProvidedTypeConverter
-class ToolResultConverter @Inject constructor(private val json: Json) {
-    private val TAG = "ToolResultConverter"
-
+    // ChatMessage.ToolResult <-> JSON String
     @TypeConverter
-    fun fromJson(jsonString: String?): ChatMessage.ToolResult? {
-        if (jsonString.isNullOrBlank()) {
-            return null
-        }
+    fun toolResultFromJson(jsonString: String?): ChatMessage.ToolResult? {
+        if (jsonString.isNullOrBlank()) return null
         return try {
             json.decodeFromString<ChatMessage.ToolResult>(jsonString)
         } catch (e: Exception) {
@@ -85,10 +64,8 @@ class ToolResultConverter @Inject constructor(private val json: Json) {
     }
 
     @TypeConverter
-    fun toJson(toolResult: ChatMessage.ToolResult?): String? {
-        if (toolResult == null) {
-            return null
-        }
+    fun toolResultToJson(toolResult: ChatMessage.ToolResult?): String? {
+        if (toolResult == null) return null
         return try {
             json.encodeToString(toolResult)
         } catch (e: Exception) {
@@ -96,30 +73,37 @@ class ToolResultConverter @Inject constructor(private val json: Json) {
             null
         }
     }
-}
 
-@ProvidedTypeConverter
-class McpServerHeadersConverter @Inject constructor(private val json: Json) {
+    // Map<String, String> <-> JSON String (headers)
     @TypeConverter
-    fun toJson(headers: Map<String, String>): String {
+    fun headersToJson(headers: Map<String, String>): String {
         return json.encodeToString(headers)
     }
 
     @TypeConverter
-    fun fromJson(jsonString: String): Map<String, String> {
+    fun headersFromJson(jsonString: String): Map<String, String> {
         return json.decodeFromString(jsonString)
     }
-}
 
-@ProvidedTypeConverter
-class McpServerAuthStatusConverter @Inject constructor(private val json: Json) {
+    // AuthStatus <-> JSON String
     @TypeConverter
-    fun toJson(authStatus: AuthStatus): String {
+    fun authStatusToJson(authStatus: AuthStatus): String {
         return json.encodeToString(authStatus)
     }
 
     @TypeConverter
-    fun fromJson(jsonString: String): AuthStatus {
+    fun authStatusFromJson(jsonString: String): AuthStatus {
+        return json.decodeFromString(jsonString)
+    }
+
+    // Tool.Input <-> JSON String
+    @TypeConverter
+    fun toolInputToJson(input: Tool.Input): String {
+        return json.encodeToString(input)
+    }
+
+    @TypeConverter
+    fun toolInputFromJson(jsonString: String): Tool.Input {
         return json.decodeFromString(jsonString)
     }
 }

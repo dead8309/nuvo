@@ -12,7 +12,8 @@ data class McpServer(
     val requiresAuth: Boolean = false,
     val authStatus: AuthStatus = AuthStatus.NOT_CHECKED,
     // Discovered AS metadata URL
-    val authorizationServerMetadataUrl: String? = null
+    val authorizationServerMetadataUrl: String? = null,
+    val version: String? = null,
 )
 
 /**

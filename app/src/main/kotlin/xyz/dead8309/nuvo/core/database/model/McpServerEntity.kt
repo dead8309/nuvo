@@ -26,4 +26,7 @@ data class McpServerEntity(
     val authorizationServerMetadataUrl: String? = null,
     @ColumnInfo("oauth_client_id", defaultValue = "NULL")
     val oauthClientId: String? = null,
+
+    @ColumnInfo("version", defaultValue = "NULL")
+    val version: String? = null,
 )

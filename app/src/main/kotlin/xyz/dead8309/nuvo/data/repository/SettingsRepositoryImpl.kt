@@ -18,8 +18,9 @@ import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.ClientRegistrationRequest
 import xyz.dead8309.nuvo.core.model.McpServer
 import xyz.dead8309.nuvo.core.model.PersistedOAuthDetails
-import xyz.dead8309.nuvo.data.model.asDomainModel
-import xyz.dead8309.nuvo.data.model.asEntity
+import xyz.dead8309.nuvo.core.model.asDomainModel
+import xyz.dead8309.nuvo.core.model.asEntity
+import xyz.dead8309.nuvo.data.model.AuthRequestDetails
 import xyz.dead8309.nuvo.data.remote.oauth.OAuthService
 import xyz.dead8309.nuvo.di.IoDispatcher
 import javax.inject.Inject

@@ -5,7 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
-import xyz.dead8309.nuvo.core.database.model.McpToolEntity
+import xyz.dead8309.nuvo.core.database.entities.McpToolEntity
 
 @Dao
 interface McpToolDao {

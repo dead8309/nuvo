@@ -13,7 +13,7 @@ import xyz.dead8309.nuvo.core.database.dao.ChatMessageDao
 import xyz.dead8309.nuvo.core.database.dao.ChatSessionDao
 import xyz.dead8309.nuvo.core.database.dao.McpServerDao
 import xyz.dead8309.nuvo.core.database.dao.McpToolDao
-import xyz.dead8309.nuvo.core.database.model.DatabaseConverters
+import xyz.dead8309.nuvo.core.database.DatabaseConverters
 import javax.inject.Singleton
 
 @Module

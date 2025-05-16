@@ -1,4 +1,4 @@
-package xyz.dead8309.nuvo.core.database.model
+package xyz.dead8309.nuvo.core.database
 
 import android.util.Log
 import androidx.room.ProvidedTypeConverter

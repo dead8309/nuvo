@@ -1,6 +1,7 @@
 package xyz.dead8309.nuvo.core.model
 
 import androidx.compose.runtime.Immutable
+import xyz.dead8309.nuvo.core.database.entities.McpServerEntity
 
 @Immutable
 data class McpServer(
@@ -16,57 +17,32 @@ data class McpServer(
     val version: String? = null,
 )
 
-/**
- * Authorization Status
- */
-enum class AuthStatus {
-    /**
-     * Initial State
-     */
-    NOT_CHECKED,
+fun McpServerEntity.asDomainModel(): McpServer {
+    return McpServer(
+        id = this.id,
+        name = this.name,
+        url = this.url,
+        headers = this.headers,
+        enabled = this.enabled,
+        requiresAuth = this.requiresAuth,
+        authStatus = authStatus,
+        authorizationServerMetadataUrl = this.authorizationServerMetadataUrl,
+        version = this.version
+    )
+}
 
-    /**
-     * MCP server requires auth, but user is not authorized
-     */
-    REQUIRED_NOT_AUTHORIZED,
-
-    /**
-     * MCP server doesn't need auth
-     */
-    NOT_REQUIRED,
-
-    /**
-     * MCP server requires auth, currently performing metadata discovery
-     */
-    REQUIRED_DISCOVERY,
-
-    /**
-     * MCP server requires auth, currently performing dynamic client registration
-     */
-    REQUIRED_REGISTRATION,
-
-    /**
-     * MCP server requires auth, waiting for user to authorize using browser
-     */
-    REQUIRED_USER_ACTION,
-
-    /**
-     * User sent to browser, waiting for callback
-     */
-    REQUIRED_AWAITING_CALLBACK,
-
-    /**
-     * Callback received, exchanging code for token
-     */
-    REQUIRED_TOKEN_EXCHANGE,
-
-    /**
-     * Successfully authorized, process valid (or refreshable) token
-     */
-    AUTHORIZED,
-
-    /**
-     * An error occurred during the authorization process
-     */
-    ERROR
+fun McpServer.asEntity(currentEntity: McpServerEntity? = null): McpServerEntity {
+    return McpServerEntity(
+        id = this.id,
+        name = this.name,
+        url = this.url,
+        headers = this.headers,
+        enabled = this.enabled,
+        requiresAuth = this.requiresAuth,
+        authStatus = this.authStatus,
+        authorizationServerMetadataUrl = this.authorizationServerMetadataUrl,
+        // Only update clientId if it's part of the model being saved,
+        oauthClientId = currentEntity?.oauthClientId,
+        version = this.version ?: currentEntity?.version
+    )
 }

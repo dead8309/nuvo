@@ -4,7 +4,7 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
-import xyz.dead8309.nuvo.core.database.model.McpServerEntity
+import xyz.dead8309.nuvo.core.database.entities.McpServerEntity
 import xyz.dead8309.nuvo.core.model.AuthStatus
 
 @Dao

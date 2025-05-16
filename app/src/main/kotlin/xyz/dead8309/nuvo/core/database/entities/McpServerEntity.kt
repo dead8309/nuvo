@@ -1,4 +1,4 @@
-package xyz.dead8309.nuvo.core.database.model
+package xyz.dead8309.nuvo.core.database.entities
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity

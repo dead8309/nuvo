@@ -16,7 +16,7 @@ interface McpToolDao {
     suspend fun insertTool(tool: McpToolEntity)
 
     @Query("SELECT * FROM mcp_tools WHERE server_id = :serverId ORDER by original_tool_name ASC")
-    suspend fun getToolsByServerId(serverId: Long): List<McpToolEntity>
+    fun getToolsByServerId(serverId: Long): Flow<List<McpToolEntity>>
 
     @Query(
         "SELECT T.* FROM mcp_tools AS T " +
@@ -30,4 +30,7 @@ interface McpToolDao {
 
     @Query("SELECT * FROM mcp_tools WHERE id = :toolId")
     suspend fun getToolById(toolId: Long): McpToolEntity?
+
+    @Query("DELETE FROM mcp_tools WHERE server_id = :serverId")
+    suspend fun deleteToolsForServer(serverId: Long)
 }

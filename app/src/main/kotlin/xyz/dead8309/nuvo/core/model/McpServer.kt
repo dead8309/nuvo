@@ -1,6 +1,7 @@
 package xyz.dead8309.nuvo.core.model
 
 import androidx.compose.runtime.Immutable
+import kotlinx.datetime.Clock
 import xyz.dead8309.nuvo.core.database.entities.McpServerEntity
 
 @Immutable
@@ -43,6 +44,7 @@ fun McpServer.asEntity(currentEntity: McpServerEntity? = null): McpServerEntity 
         authorizationServerMetadataUrl = this.authorizationServerMetadataUrl,
         // Only update clientId if it's part of the model being saved,
         oauthClientId = currentEntity?.oauthClientId,
-        version = this.version ?: currentEntity?.version
+        version = this.version ?: currentEntity?.version,
+        createdAt = Clock.System.now()
     )
 }

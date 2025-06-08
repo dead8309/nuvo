@@ -52,7 +52,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override fun getAllMcpServers(): Flow<List<McpServer>> {
         return mcpServerDao.getAllServers()
-            .map { entities -> entities.map { it.asDomainModel() } }
+            .map { entities ->
+                entities.sortedByDescending { it.createdAt }.map { it.asDomainModel() }
+            }
             .distinctUntilChanged()
     }
 

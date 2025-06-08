@@ -2,7 +2,9 @@ package xyz.dead8309.nuvo.data.remote.mcp.client
 
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import kotlinx.coroutines.flow.StateFlow
+import xyz.dead8309.nuvo.core.database.entities.McpServerEntity
 
+/** ClientId is the [McpServerEntity.id] */
 typealias ClientId = Long
 
 interface McpConnectionManager {

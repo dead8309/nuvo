@@ -15,7 +15,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -28,9 +27,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import xyz.dead8309.nuvo.core.model.ChatMessage
+import xyz.dead8309.nuvo.core.model.McpServer
 import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor.Companion.createNamespacedToolName
 import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor.Companion.extractOriginalToolName
-import xyz.dead8309.nuvo.data.remote.mcp.client.ConnectionState
 import xyz.dead8309.nuvo.data.remote.mcp.client.McpConnectionManager
 import xyz.dead8309.nuvo.data.repository.SettingsRepository
 import xyz.dead8309.nuvo.di.ApplicationScope
@@ -67,7 +66,11 @@ class McpToolExecutorImpl @Inject constructor(
     }
 
     private fun observeAndRefreshToolMapping() {
+        var refreshJob: Job? = null
+        var lastServerIds: Set<Long> = emptySet()
         appScope.launch(ioDispatcher + SupervisorJob()) {
+            Log.i(TAG, "Initial tool mapping refresh at app startup")
+
             settingsRepository.getAllMcpServers()
                 .map { configs ->
                     configs
@@ -76,145 +79,28 @@ class McpToolExecutorImpl @Inject constructor(
                 }
                 .distinctUntilChanged()
                 .collectLatest { enabledServerIds ->
-                    Log.d(TAG, "Enabled servers changed: $enabledServerIds")
-                    enabledServerIds.forEach { serverId ->
-                        connectionManager.connectionState
-                            .map { it[serverId] }
-                            .filter { it == ConnectionState.CONNECTED }
-                            .first()
-                        Log.d(TAG, "Server $serverId is connected, proceeding with tool fetch")
+                    if (enabledServerIds.toSet() == lastServerIds.toSet()) {
+                        Log.d(TAG, "Skipping refresh for same server set: $enabledServerIds")
+                        return@collectLatest
                     }
-                    refreshToolMappingInternal()
+
+                    Log.d(TAG, "Enabled servers changed: $enabledServerIds")
+                    lastServerIds = enabledServerIds.toSet()
+                    refreshJob?.cancel()
+                    refreshJob = launch {
+                        refreshToolMapping()
+                    }
                 }
         }
     }
 
-    private suspend fun refreshToolMappingInternal(): Map<String, Long> = mappingMutex.withLock {
-        Log.i(TAG, "Refreshing tool-to-server mapping")
-        toolMappingJob?.cancelAndJoin()
 
-        val refreshCoroutineJob = Job()
-        toolMappingJob =
-            CoroutineScope(ioDispatcher + refreshCoroutineJob + SupervisorJob()).launch {
-                val enabledServers = settingsRepository.getAllMcpServers()
-                    .first()
-                    .filter { it.enabled && it.url.isNotBlank() }
-                val newMap = mutableMapOf<String, Long>()
-                val newTools = mutableListOf<Tool>()
-
-                if (enabledServers.isEmpty()) {
-                    Log.w(TAG, "No enabled servers found for tool mapping")
-                    toolToServerMap = emptyMap()
-                    availableTools = emptyList()
-                    return@launch
-                }
-
-                Log.d(TAG, "Fetching tools from ${enabledServers.size} enabled servers...")
-                coroutineScope {
-                    enabledServers.map { serverConfig ->
-                        async {
-                            val client = connectionManager.getExistingClient(serverConfig.id)
-                            if (client == null) {
-                                Log.e(
-                                    TAG,
-                                    "Could not connect to server ${serverConfig.id} to list tools"
-                                )
-                                return@async
-                            }
-                            var retryCount = 0
-                            var retryDelay = INITIAL_RETRY_DELAY
-                            while (retryCount < MAX_RETRIES) {
-                                try {
-                                    Log.d(
-                                        TAG,
-                                        "Attempting to list tools for server ${serverConfig.id}, attempt $retryCount"
-                                    )
-                                    val toolsResult = withTimeout(LIST_TOOLS_TIMEOUT_MS) {
-                                        Log.v(
-                                            TAG,
-                                            "Calling client.listTools() for server ${serverConfig.id}"
-                                        )
-                                        val result = client.listTools()
-                                        Log.v(TAG, "client.listTools() returned: $result")
-                                        result
-                                    }
-                                    if (toolsResult == null) {
-                                        Log.w(
-                                            TAG,
-                                            "No tools found on server ${serverConfig.id}, attempt $retryCount"
-                                        )
-                                        break
-                                    }
-                                    Log.d(
-                                        TAG,
-                                        "Found ${toolsResult.tools.size} tools on server ${serverConfig.id}"
-                                    )
-                                    toolsResult.tools.forEach { tool ->
-                                        val namespacedName =
-                                            createNamespacedToolName(
-                                                serverConfig.id,
-                                                tool.name
-                                            )
-                                        newMap[namespacedName] = serverConfig.id
-                                        newTools.add(tool.copy(name = namespacedName))
-                                    }
-                                    break
-                                } catch (e: TimeoutCancellationException) {
-                                    Log.w(
-                                        TAG,
-                                        "listTools() timed out for ${serverConfig.id}, attempt $retryCount",
-                                        e
-                                    )
-                                    retryCount++
-                                    if (retryCount < MAX_RETRIES) {
-                                        Log.w(
-                                            TAG,
-                                            "Retrying listTools for ${serverConfig.id}, delay ${retryDelay}s"
-                                        )
-                                        delay(retryDelay)
-                                        retryDelay *= 2
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(
-                                        TAG,
-                                        "Failed to list tools from server ${serverConfig.id}, attempt $retryCount",
-                                        e
-                                    )
-                                    retryCount++
-                                    if (retryCount < MAX_RETRIES) {
-                                        Log.w(
-                                            TAG,
-                                            "Retrying listTools for ${serverConfig.id}, delay ${retryDelay}s"
-                                        )
-                                        delay(retryDelay)
-                                        retryDelay *= 2
-                                    }
-                                }
-                            }
-                            if (retryCount >= MAX_RETRIES) {
-                                Log.e(
-                                    TAG,
-                                    "Failed to list tools for ${serverConfig.id} after $MAX_RETRIES attempts"
-                                )
-                            }
-                        }
-                    }.awaitAll()
-                }
-                toolToServerMap = newMap
-                availableTools = newTools
-                Log.i(TAG, "Tool-to-server mapping refreshed with ${newTools.size} tools")
-            }
-
-        try {
-            toolMappingJob?.join()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to refresh tool mapping", e)
+    override suspend fun refreshToolMapping(serverIds: List<Long>) {
+        if (serverIds.isEmpty()) {
+            refreshToolMappingInternal()
+        } else {
+            refreshToolMappingInternal(serverIds)
         }
-        return toolToServerMap
-    }
-
-    override suspend fun refreshToolMapping() {
-        refreshToolMappingInternal()
     }
 
     private suspend fun ensureToolMappingIsFresh() {
@@ -347,71 +233,167 @@ class McpToolExecutorImpl @Inject constructor(
             Log.e(TAG, "Failed to refresh tools, returning cached tools", e)
             availableTools
         }
-//        ensureToolMappingIsFresh()
-//
-//        val enabledServers = settingsRepository.getAllMcpServers().first()
-//            .filter { it.enabled && it.url.isNotBlank() }
-//
-//        val allTools = mutableListOf<Tool>()
-//
-//        coroutineScope {
-//            enabledServers.map { serverConfig ->
-//                async {
-//                    connectionManager.getOrConnectClient(serverConfig.id)?.let { client ->
-//                        var retryCount = 0
-//                        var retryDelay = INITIAL_RETRY_DELAY
-//                        var tools: List<Tool> = emptyList()
-//                        while (retryCount < MAX_RETRIES) {
-//                            try {
-//                                val toolResult =
-//                                    withTimeout(LIST_TOOLS_TIMEOUT_MS) { client.listTools() }
-//                                if (toolResult != null) {
-//                                    tools = toolResult.tools.map { tool ->
-//                                        val namespacedName =
-//                                            createNamespacedToolName(serverConfig.id, tool.name)
-//                                        Tool(
-//                                            name = namespacedName,
-//                                            description = tool.description,
-//                                            inputSchema = tool.inputSchema
-//                                        )
-//                                    }
-//                                    Log.d(
-//                                        TAG,
-//                                        "Found ${tools.size} tools on server ${serverConfig.id}"
-//                                    )
-//                                    break
-//                                }
-//                            } catch (e: Exception) {
-//                                Log.e(
-//                                    TAG,
-//                                    "Failed to list tools from server ${serverConfig.id}, attempt $retryCount",
-//                                    e
-//                                )
-//                                retryCount++
-//                                if (retryCount < MAX_RETRIES) {
-//                                    Log.w(
-//                                        TAG,
-//                                        "Retrying listTools for ${serverConfig.id}, delay ${retryDelay}s"
-//                                    )
-//                                    delay(retryDelay.seconds)
-//                                    retryDelay *= 2
-//                                }
-//                            }
-//                        }
-//                        if (retryCount >= MAX_RETRIES) {
-//                            Log.e(
-//                                TAG,
-//                                "Failed to list tools for ${serverConfig.id} after $MAX_RETRIES attempts"
-//                            )
-//                        }
-//                        tools
-//                    } ?: emptyList()
-//                }
-//            }.awaitAll().flatten()
-//        }.also { allTools.addAll(it) }
-//
-//        Log.d(TAG, "Total available tools found (namespaced): ${allTools.size}")
-//        return@withContext allTools
     }
 
+
+    private suspend fun refreshToolMappingInternal(): Map<String, Long> = mappingMutex.withLock {
+        Log.i(TAG, "Refreshing tool-to-server mapping")
+        toolMappingJob?.cancelAndJoin()
+
+        val refreshCoroutineJob = Job()
+        toolMappingJob =
+            CoroutineScope(ioDispatcher + refreshCoroutineJob + SupervisorJob()).launch {
+                val enabledServers = settingsRepository.getAllMcpServers()
+                    .first()
+                    .filter { it.enabled && it.url.isNotBlank() }
+                val newMap = mutableMapOf<String, Long>()
+                val newTools = mutableListOf<Tool>()
+
+                if (enabledServers.isEmpty()) {
+                    Log.w(TAG, "No enabled servers found for tool mapping")
+                    toolToServerMap = emptyMap()
+                    availableTools = emptyList()
+                    return@launch
+                }
+
+                Log.d(TAG, "Fetching tools from ${enabledServers.size} enabled servers...")
+                coroutineScope {
+                    enabledServers.map { serverConfig ->
+                        async {
+                            fetchToolsForServer(
+                                server = serverConfig,
+                                toolMap = newMap,
+                                toolsList = newTools
+                            )
+                        }
+                    }.awaitAll()
+                }
+                toolToServerMap = newMap
+                availableTools = newTools
+                Log.i(TAG, "Tool-to-server mapping refreshed with ${newTools.size} tools")
+            }
+
+        try {
+            toolMappingJob?.join()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to refresh tool mapping for servers", e)
+        }
+        return toolToServerMap
+    }
+
+    private suspend fun refreshToolMappingInternal(serverIds: List<Long>) {
+        Log.i(TAG, "Refreshing tool-to-server mapping for specific servers: $serverIds")
+        toolMappingJob?.cancelAndJoin()
+
+        val refreshCoroutineJob = Job()
+        toolMappingJob =
+            CoroutineScope(ioDispatcher + refreshCoroutineJob + SupervisorJob()).launch {
+                val serversToRefresh = settingsRepository.getAllMcpServers()
+                    .first()
+                    .filter { it.enabled && it.url.isNotBlank() && serverIds.contains(it.id) }
+                val newMap = mutableMapOf<String, Long>()
+                val newTools = mutableListOf<Tool>()
+                if (serversToRefresh.isEmpty()) {
+                    Log.w(TAG, "No enabled servers found for tool mapping")
+                    return@launch
+                }
+
+                Log.d(TAG, "Fetching tools from ${serversToRefresh.size} specified servers...")
+                coroutineScope {
+                    serversToRefresh.map { serverConfig ->
+                        async {
+                            fetchToolsForServer(
+                                server = serverConfig,
+                                toolMap = newMap,
+                                toolsList = newTools
+                            )
+                        }
+                    }.awaitAll()
+                }
+
+                toolToServerMap = toolToServerMap.toMutableMap().apply { putAll(newMap) }
+                availableTools = availableTools.toMutableList().apply { addAll(newTools) }
+                Log.i(
+                    TAG,
+                    "Tool-to-server mapping refreshed for specified servers with ${newTools.size} tools"
+                )
+                try {
+                    toolMappingJob?.join()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to refresh tool mapping for servers", e)
+                }
+            }
+    }
+
+    private suspend fun fetchToolsForServer(
+        server: McpServer,
+        toolMap: MutableMap<String, Long>,
+        toolsList: MutableList<Tool>
+    ) {
+        Log.d(TAG, "Starting connection for server ${server.id}")
+        val client = connectionManager.getOrConnectClient(server.id)
+        if (client == null) {
+            Log.e(TAG, "Could not connect to server ${server.id} to list tools")
+            return
+        }
+
+        var retryCount = 0
+        var retryDelay = INITIAL_RETRY_DELAY
+        while (retryCount < MAX_RETRIES) {
+            try {
+                Log.d(
+                    TAG,
+                    "Attempting to list tools for server ${server.id}, attempt $retryCount"
+                )
+                val toolsResult = withTimeout(LIST_TOOLS_TIMEOUT_MS) {
+                    Log.v(TAG, "Calling client.listTools() for server ${server.id}")
+                    val result = client.listTools()
+                    Log.v(TAG, "client.listTools() returned: $result")
+                    result
+                }
+
+                if (toolsResult == null) {
+                    Log.w(TAG, "No tools found on server ${server.id}, attempt $retryCount")
+                    break
+                }
+
+                Log.d(TAG, "Found ${toolsResult.tools.size} tools on server ${server.id}")
+                toolsResult.tools.forEach { tool ->
+                    val namespacedName = createNamespacedToolName(
+                        server.id,
+                        tool.name
+                    )
+                    toolMap[namespacedName] = server.id
+                    toolsList.add(tool.copy(name = namespacedName))
+                }
+
+                settingsRepository.updateToolsForServer(server.id, toolsResult.tools)
+                break
+            } catch (e: TimeoutCancellationException) {
+                Log.w(TAG, "listTools() timed out for ${server.id}, attempt $retryCount", e)
+                retryCount++
+                if (retryCount < MAX_RETRIES) {
+                    Log.w(TAG, "Retrying listTools for ${server.id}, delay ${retryDelay}s")
+                    delay(retryDelay)
+                    retryDelay *= 2
+                }
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "Failed to list tools from server ${server.id}, attempt $retryCount",
+                    e
+                )
+                retryCount++
+                if (retryCount < MAX_RETRIES) {
+                    Log.w(TAG, "Retrying listTools for ${server.id}, delay ${retryDelay}s")
+                    delay(retryDelay)
+                    retryDelay *= 2
+                }
+            }
+        }
+
+        if (retryCount >= MAX_RETRIES) {
+            Log.e(TAG, "Failed to list tools for ${server.id} after $MAX_RETRIES attempts")
+        }
+    }
 }

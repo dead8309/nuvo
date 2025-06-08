@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.util.Log
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,7 +15,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.WhileSubscribed
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -26,8 +26,11 @@ import net.openid.appauth.AuthorizationResponse
 import net.openid.appauth.AuthorizationService
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.ResponseTypeValues
+import xyz.dead8309.nuvo.core.database.entities.McpToolEntity
 import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.McpServer
+import xyz.dead8309.nuvo.data.remote.mcp.McpToolExecutor
+import xyz.dead8309.nuvo.data.remote.mcp.client.McpConnectionManager
 import xyz.dead8309.nuvo.data.remote.oauth.OAuthService
 import xyz.dead8309.nuvo.data.repository.SettingsRepository
 import java.security.SecureRandom
@@ -43,18 +46,59 @@ private const val KEY_SERVER_ID_PREFIX = "server_id_"
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val application: Context,
     private val settingsRepository: SettingsRepository,
-    private val appAuthService: AuthorizationService
+    private val appAuthService: AuthorizationService,
+    mcpConnectionManager: McpConnectionManager,
+    private val mcpToolExecutor: McpToolExecutor
 ) : AndroidViewModel(application as Application) {
 
     private val _userMessage = MutableStateFlow<String?>(null)
     private val _openApiKeyInput = MutableStateFlow<String?>(null)
+    private val _serverToolsMap = MutableStateFlow<Map<Long, List<McpToolEntity>>>(emptyMap())
+
+    init {
+        viewModelScope.launch {
+            settingsRepository.getAllMcpServers()
+                .collect { servers ->
+                    val enabledServers = servers.filter { it.enabled }
+                    Log.d(TAG, "Collecting tools for ${enabledServers.size} enabled servers")
+                    for (server in enabledServers) {
+                        launch {
+                            settingsRepository.getToolsForServerSettings(server.id)
+                                .collect { tools ->
+                                    Log.d(
+                                        TAG,
+                                        "Received ${tools.size} tools for server ${server.id}: ${tools.map { it.originalToolName }}"
+                                    )
+                                    val currentMap = _serverToolsMap.value.toMutableMap()
+                                    currentMap[server.id] = tools
+                                    _serverToolsMap.value = currentMap
+                                    Log.d(
+                                        TAG,
+                                        "Updated server tools map: ${_serverToolsMap.value.map { "${it.key} -> ${it.value.size} tools" }}"
+                                    )
+                                }
+                        }
+                    }
+                }
+        }
+    }
 
     val state: StateFlow<SettingsUiState> = combine(
         settingsRepository.appSettingsFlow,
         settingsRepository.getAllMcpServers(),
         _openApiKeyInput,
-        _userMessage
-    ) { settings, mcpServers, currentApiKeyInput, message ->
+        _userMessage,
+        mcpConnectionManager.connectionState
+    ) { settings, mcpServers, currentApiKeyInput, message, connectionStates ->
+        Quintuple(
+            first = settings,
+            second = mcpServers,
+            third = currentApiKeyInput,
+            fourth = message,
+            fifth = connectionStates
+        )
+    }.combine(_serverToolsMap) { quintuple, serverTools ->
+        val (settings, mcpServers, currentApiKeyInput, message, connectionStates) = quintuple
         val displayValue = currentApiKeyInput ?: settings.openaiApiKey ?: ""
 
         if (currentApiKeyInput == null && settings.openaiApiKey != null) {
@@ -64,14 +108,15 @@ class SettingsViewModel @Inject constructor(
         SettingsUiState(
             openAiApiKey = displayValue,
             mcpServers = mcpServers,
-            userMessage = message
+            userMessage = message,
+            connectionStates = connectionStates,
+            serverTools = serverTools
         )
-    }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5.seconds),
-            initialValue = SettingsUiState()
-        )
+    }.stateIn(
+        viewModelScope,
+        started = SharingStarted.WhileSubscribed(5.seconds.inWholeMilliseconds),
+        initialValue = SettingsUiState()
+    )
 
     // Standard Storage for State -> Server ID Mapping
     private val tempStatePrefs: SharedPreferences by lazy {
@@ -98,9 +143,9 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val savedId = settingsRepository.saveMcpSever(config)
-                if (config.id == 0L && savedId > 0) savedId else config.id
+                val serverId = if (config.id == 0L && savedId > 0) savedId else config.id
                 if (config.requiresAuth && config.authStatus == AuthStatus.NOT_CHECKED) {
-                    performDiscovery(config.id)
+                    performDiscovery(serverId)
                 }
                 _userMessage.value = "MCP server saved successfully"
             } catch (e: Exception) {
@@ -295,8 +340,10 @@ class SettingsViewModel @Inject constructor(
                                     serverId,
                                     tokenResponse
                                 )
-                                // status set to AUTHORIZED in repository
+                                /** NOTE: status set to AUTHORIZED in repository **/
                                 _userMessage.value = "Authorization successful"
+                                // Refresh this server's tools
+                                mcpToolExecutor.refreshToolMapping(listOf(serverId))
                             } else {
                                 Log.wtf(
                                     TAG,
@@ -325,21 +372,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun clearOAuthDetails(serverId: Long) {
-        viewModelScope.launch {
-            try {
-                settingsRepository.clearOAuthDetails(serverId)
-                _userMessage.value = "MCP server OAuth details cleared"
-                // TODO: come back to this
-                // maybe not needed
-                // performDiscovery(serverId)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to clear OAuth details for server $serverId", e)
-                _userMessage.value = "Failed to clear OAuth details"
-            }
-        }
-    }
-
     fun checkAndTriggerDiscovery(serverId: Long) {
         viewModelScope.launch {
             val server = settingsRepository.getMcpServer(serverId)
@@ -364,7 +396,7 @@ class SettingsViewModel @Inject constructor(
 
     private fun storeTemporaryStateToServerIdMapping(state: String, serverId: Long) {
         val key = "$KEY_SERVER_ID_PREFIX$state"
-        tempStatePrefs.edit().putLong(key, serverId).apply()
+        tempStatePrefs.edit { putLong(key, serverId) }
         Log.d(TAG, "Stored state mapping: $state -> $serverId")
     }
 
@@ -372,7 +404,7 @@ class SettingsViewModel @Inject constructor(
         val key = "$KEY_SERVER_ID_PREFIX$state"
         val serverId = tempStatePrefs.getLong(key, -1)
         return if (serverId != -1L) {
-            tempStatePrefs.edit().remove(key).apply()
+            tempStatePrefs.edit { remove(key) }
             Log.d(TAG, "Retrieved and cleared state mapping: $state -> $serverId")
             serverId
         } else {

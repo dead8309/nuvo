@@ -5,23 +5,22 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +36,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -53,8 +51,9 @@ import net.openid.appauth.AuthorizationResponse
 import xyz.dead8309.nuvo.R
 import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.McpServer
-import xyz.dead8309.nuvo.ui.components.AddEditMcpServerDialog
-import xyz.dead8309.nuvo.ui.components.McpServerItem
+import xyz.dead8309.nuvo.data.remote.mcp.client.ConnectionState
+import xyz.dead8309.nuvo.ui.components.mpc.AddEditMcpServerDialog
+import xyz.dead8309.nuvo.ui.components.mpc.McpServerItem
 import xyz.dead8309.nuvo.ui.theme.NuvoTheme
 
 @Composable
@@ -64,7 +63,6 @@ fun SettingsScreen(
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LocalContext.current
     var serverIdForAuthFlow by remember { mutableStateOf<Long?>(null) }
 
     val authorizationLauncher = rememberLauncherForActivityResult(
@@ -141,7 +139,6 @@ fun SettingsScreen(
             if (enabled) viewModel.checkAndTriggerDiscovery(id)
         },
         onInitiateAuth = viewModel::prepareAuthorizationIntent,
-        onRevokeAuth = viewModel::clearOAuthDetails
     )
 }
 
@@ -154,112 +151,111 @@ private fun SettingsScreen(
     onDeleteMcpConfig: (Long) -> Unit = {},
     onToggleMcpConfig: (Long, Boolean) -> Unit = { _, _ -> },
     onInitiateAuth: (Long) -> Unit = {},
-    onRevokeAuth: (Long) -> Unit = {},
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     var showAddEditMcpDialog by rememberSaveable { mutableStateOf(false) }
     var mcpConfigToEdit by rememberSaveable { mutableStateOf<McpServer?>(null) }
-
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
 
-    LazyColumn(
-        modifier = modifier
-            .padding(horizontal = 16.dp)
-            .fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 16.dp)
-    ) {
-        item {
-            Text(
-                stringResource(R.string.settings_openai_api_key_label),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 16.dp)
-            )
-            OutlinedTextField(
-                value = state.openAiApiKey,
-                onValueChange = onOpenAIApiKeyChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.settings_api_key_hint)) },
-                placeholder = { Text(stringResource(R.string.settings_api_key_placeholder)) },
-                singleLine = true,
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(
-                    onDone = { keyboardController?.hide() }
-                ),
-                trailingIcon = {
-                    val image =
-                        if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility
-                    val description =
-                        if (passwordVisible) stringResource(R.string.settings_hide_api_key) else stringResource(
-                            R.string.settings_show_api_key
-                        )
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(imageVector = image, contentDescription = description)
-                    }
-                }
-            )
-            HorizontalDivider()
-        }
-
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "MCP Servers",
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Button(onClick = {
-                    mcpConfigToEdit = null
-                    showAddEditMcpDialog = true
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add MCP Server",
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(text = "Add Server")
-                }
-            }
-        }
-
-        if (state.mcpServers.isEmpty()) {
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(bottom = (100 + 16).dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             item {
                 Text(
-                    text = "No MCP servers configured",
+                    stringResource(R.string.settings_openai_api_key_label),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(top = 16.dp)
                 )
+                OutlinedTextField(
+                    value = state.openAiApiKey,
+                    onValueChange = onOpenAIApiKeyChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.settings_api_key_hint)) },
+                    placeholder = { Text(stringResource(R.string.settings_api_key_placeholder)) },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { keyboardController?.hide() }
+                    ),
+                    trailingIcon = {
+                        val image =
+                            if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility
+                        val description =
+                            if (passwordVisible) stringResource(R.string.settings_hide_api_key) else stringResource(
+                                R.string.settings_show_api_key
+                            )
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(imageVector = image, contentDescription = description)
+                        }
+                    }
+                )
             }
-        } else {
+
+            item {
+                Text(
+                    text = "MCP Servers",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                )
+            }
+
+            if (state.mcpServers.isEmpty()) {
+                item {
+                    Text(
+                        text = "No MCP servers configured",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                }
+            }
+
             items(state.mcpServers, key = { it.id }) { serverConfig ->
+                val serverTools = state.serverTools[serverConfig.id] ?: emptyList()
                 McpServerItem(
                     config = serverConfig,
                     isChecked = serverConfig.enabled,
                     onCheckedChange = { isEnabled ->
-                        onToggleMcpConfig(
-                            serverConfig.id,
-                            isEnabled
-                        )
+                        onToggleMcpConfig(serverConfig.id, isEnabled)
                     },
                     onEditClick = {
                         mcpConfigToEdit = serverConfig
                         showAddEditMcpDialog = true
                     },
                     onDeleteClick = { onDeleteMcpConfig(serverConfig.id) },
-                    authStatus = serverConfig.authStatus,
                     onAuthClick = { onInitiateAuth(serverConfig.id) },
-                    onRevokeClick = { onRevokeAuth(serverConfig.id) },
+                    connectionState = state.connectionStates[serverConfig.id]
+                        ?: ConnectionState.DISCONNECTED,
+                    tools = serverTools
                 )
-                HorizontalDivider()
             }
+        }
+
+        FloatingActionButton(
+            onClick = {
+                mcpConfigToEdit = null
+                showAddEditMcpDialog = true
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp)
+                .size(90.dp),
+            containerColor = MaterialTheme.colorScheme.primary,
+            shape = CircleShape
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Add MCP Server",
+                modifier = Modifier.size(26.dp)
+            )
         }
     }
 
@@ -300,3 +296,4 @@ private fun SettingsScreenPreview() {
         )
     }
 }
+

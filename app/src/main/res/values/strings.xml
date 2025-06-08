@@ -35,4 +35,9 @@
     <string name="settings_mcp_server_name_label">Server Name</string>
     <string name="settings_mcp_server_url_label">Server URL</string>
     <string name="settings_mcp_server_headers_label">Headers</string>
+    <string name="tools">Tools</string>
+    <string name="settings_mcp_no_tools">No tools available</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="failed">Failed</string>
 </resources>

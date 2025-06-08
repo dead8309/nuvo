@@ -210,25 +210,23 @@ fun McpServerItem(
                 }
             }
 
-            if (!config.requiresAuth || config.authStatus == AuthStatus.AUTHORIZED) {
-                Row(
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ConnectionIndicator(
+                    state = connectionState,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ConnectionIndicator(
-                        state = connectionState,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Switch(
-                        checked = isChecked,
-                        onClick = {
-                            onCheckedChange(!isChecked)
-                        },
-                    )
-                }
+                )
+                Switch(
+                    checked = isChecked,
+                    onClick = {
+                        onCheckedChange(!isChecked)
+                    },
+                )
             }
 
             AuthActions(

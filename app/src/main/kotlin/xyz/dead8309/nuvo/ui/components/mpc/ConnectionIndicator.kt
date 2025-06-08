@@ -1,6 +1,7 @@
 package xyz.dead8309.nuvo.ui.components.mpc
 
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -16,7 +17,7 @@ import xyz.dead8309.nuvo.data.remote.mcp.client.ConnectionState
 fun ConnectionIndicator(state: ConnectionState, modifier: Modifier = Modifier) {
     // NOTE: not showing anything for FAILED state as AuthActions handles it
     if (state == ConnectionState.FAILED) {
-        Spacer(modifier)
+        Spacer(Modifier.height(1.dp))
         return
     }
 

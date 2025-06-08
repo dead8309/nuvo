@@ -6,10 +6,12 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -17,14 +19,18 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import xyz.dead8309.nuvo.navigation.ChatRoute
 import xyz.dead8309.nuvo.navigation.HomeRoute
+import xyz.dead8309.nuvo.navigation.McpRoute
 import xyz.dead8309.nuvo.navigation.SettingsRoute
 import xyz.dead8309.nuvo.navigation.navigateToChat
 import xyz.dead8309.nuvo.navigation.navigateToHome
+import xyz.dead8309.nuvo.navigation.navigateToMcp
 import xyz.dead8309.nuvo.navigation.navigateToNewChat
 import xyz.dead8309.nuvo.navigation.navigateToSettings
+import xyz.dead8309.nuvo.ui.screens.settings.SettingsViewModel
 
 @Composable
 fun rememberNuvoAppState(
@@ -32,23 +38,31 @@ fun rememberNuvoAppState(
     drawerState: DrawerState = rememberDrawerState(initialValue = DrawerValue.Closed),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     coroutineScope: CoroutineScope = rememberCoroutineScope(),
+    settingsViewModel: SettingsViewModel = hiltViewModel()
 ): NuvoAppState {
     val currentNavBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination: NavDestination? = currentNavBackStackEntry?.destination
+
+    // Get the count of MCP servers from the SettingsViewModel
+    val mcpServersCount by settingsViewModel.state
+        .map { it.mcpServers.size }
+        .collectAsState(initial = 0)
 
     return remember(
         navController,
         drawerState,
         snackbarHostState,
         coroutineScope,
-        currentDestination
+        currentDestination,
+        mcpServersCount
     ) {
         NuvoAppState(
             navController,
             drawerState,
             snackbarHostState,
             coroutineScope,
-            currentDestination
+            currentDestination,
+            mcpServersCount
         )
     }
 }
@@ -60,6 +74,7 @@ class NuvoAppState(
     val snackbarHostState: SnackbarHostState,
     private val coroutineScope: CoroutineScope,
     private val currentDestination: NavDestination?,
+    val mcpCount: Int = 0,
 ) {
 
     val canNavigateToNewChat: Boolean by derivedStateOf {
@@ -70,6 +85,7 @@ class NuvoAppState(
         when {
             currentDestination?.hasRoute(route = HomeRoute::class) == true -> true
             currentDestination?.hasRoute(route = ChatRoute::class) == true -> true
+            currentDestination?.hasRoute(route = McpRoute::class) == true -> false
             currentDestination?.hasRoute(route = SettingsRoute::class) == true -> false
             else -> false
         }
@@ -107,6 +123,12 @@ class NuvoAppState(
         navController.navigateToSettings {
             launchSingleTop = true
         }
+        closeDrawer()
+    }
+
+    fun navigateToMcp() {
+        navController.navigateToMcp()
+        closeDrawer()
     }
 
     fun openDrawer() {
@@ -121,3 +143,4 @@ class NuvoAppState(
         }
     }
 }
+

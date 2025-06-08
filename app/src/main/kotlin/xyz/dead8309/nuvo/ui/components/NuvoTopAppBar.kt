@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -18,10 +19,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.AddCircle
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,8 +38,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import xyz.dead8309.nuvo.R
 import xyz.dead8309.nuvo.ui.theme.NuvoTheme
 
@@ -49,7 +55,9 @@ fun NuvoTopAppBar(
     onModelChangeClick: () -> Unit,
     onMenuIconClick: () -> Unit,
     onNewChatClick: () -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onMcpClick: () -> Unit,
+    mcpCount: Int = 0
 ) {
     CenterAlignedTopAppBar(
         title = {
@@ -83,14 +91,42 @@ fun NuvoTopAppBar(
                     onClick = onNewChatClick
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AddCircle,
+                        imageVector = Icons.Outlined.AddCircle,
                         contentDescription = stringResource(R.string.new_chat_content_desc),
                     )
                 }
             }
+
+            BadgedBox(
+                badge = {
+                    if (mcpCount > 0) {
+                        Badge(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .offset(x = (-6).dp, y = 6.dp)
+                        ) {
+                            Text(
+                                text = if (mcpCount > 99) "99+" else mcpCount.toString(),
+                                fontSize = 10.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 2.dp)
+                            )
+                        }
+                    }
+                }
+            ) {
+                IconButton(onMcpClick) {
+                    Icon(
+                        imageVector = Icons.Outlined.Build,
+                        contentDescription = stringResource(R.string.mcp_servers_content_desc),
+                    )
+                }
+            }
+
             IconButton(onClick = onSettingsClick) {
                 Icon(
-                    imageVector = Icons.Default.Settings,
+                    imageVector = Icons.Outlined.Settings,
                     contentDescription = stringResource(R.string.settings_content_desc),
                 )
             }
@@ -135,7 +171,6 @@ private fun ModelSelectionRow(
     }
 }
 
-
 @Preview
 @Composable
 private fun NuvoTopAppBarPreview() {
@@ -146,7 +181,9 @@ private fun NuvoTopAppBarPreview() {
             onMenuIconClick = {},
             onModelChangeClick = {},
             onNewChatClick = {},
-            onSettingsClick = {}
+            onSettingsClick = {},
+            onMcpClick = {},
+            mcpCount = 3
         )
     }
 }

@@ -12,11 +12,12 @@
     <string name="select_ai_model_button">Select AI Model</string>
     <string name="ai_model_selection_title">Choose AI Model</string>
     <string name="settings_content_desc">Go to settings</string>
+    <string name="mcp_servers_content_desc">Manage MCP servers</string>
+    <string name="mcp_servers_title">MCP Servers</string>
     <string name="home_welcome_message">Welcome to</string>
     <string name="home_instruction">Send a message to start chatting</string>
 
     <string name="settings_title">Settings</string>
-    <string name="settings_openai_api_key_label">OpenAI API Key</string>
     <string name="settings_api_key_hint">API Key</string>
     <string name="settings_api_key_placeholder">Enter your OpenAI key here</string>
     <string name="settings_show_api_key">Show API Key</string>
@@ -28,7 +29,6 @@
     <string name="settings_add_mcp_server_fab_desc">Add MCP Server</string>
     <string name="settings_edit_mcp_server_desc">Edit %1$s</string>
     <string name="settings_delete_mcp_server_desc">Delete %1$s</string>
-    <string name="settings_mcp_unnamed_server">(Unnamed Server)</string>
 
     <string name="settings_add_mcp_server_title">Add MCP Server</string>
     <string name="settings_edit_mcp_server_title">Edit MCP Server</string>
@@ -41,3 +41,4 @@
     <string name="disconnected">Disconnected</string>
     <string name="failed">Failed</string>
 </resources>
+

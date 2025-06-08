@@ -100,7 +100,7 @@ fun McpServerItem(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = config.name.ifBlank { stringResource(R.string.settings_mcp_unnamed_server) },
+                            text = config.name,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.titleLarge.copy(
@@ -210,23 +210,25 @@ fun McpServerItem(
                 }
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ConnectionIndicator(
-                    state = connectionState,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = isChecked,
-                    onClick = {
-                        onCheckedChange(!isChecked)
-                    },
-                )
+            if (!config.requiresAuth || config.authStatus == AuthStatus.AUTHORIZED) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ConnectionIndicator(
+                        state = connectionState,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = isChecked,
+                        onClick = {
+                            onCheckedChange(!isChecked)
+                        },
+                    )
+                }
             }
 
             AuthActions(

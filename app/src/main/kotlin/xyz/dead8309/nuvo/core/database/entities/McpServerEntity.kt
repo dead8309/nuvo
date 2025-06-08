@@ -1,8 +1,9 @@
-package xyz.dead8309.nuvo.core.database.model
+package xyz.dead8309.nuvo.core.database.entities
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.datetime.Instant
 import xyz.dead8309.nuvo.core.model.AuthStatus
 
 @Entity("mcp_servers")
@@ -26,4 +27,10 @@ data class McpServerEntity(
     val authorizationServerMetadataUrl: String? = null,
     @ColumnInfo("oauth_client_id", defaultValue = "NULL")
     val oauthClientId: String? = null,
+
+    @ColumnInfo("version", defaultValue = "NULL")
+    val version: String? = null,
+
+    @ColumnInfo(name = "created_at")
+    val createdAt: Instant,
 )

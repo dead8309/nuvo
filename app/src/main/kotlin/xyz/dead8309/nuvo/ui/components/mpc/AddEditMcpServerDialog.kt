@@ -1,4 +1,4 @@
-package xyz.dead8309.nuvo.ui.components
+package xyz.dead8309.nuvo.ui.components.mpc
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

@@ -1,11 +1,10 @@
-package xyz.dead8309.nuvo.core.database.model
+package xyz.dead8309.nuvo.core.database.entities
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import androidx.room.TypeConverters
 import kotlinx.datetime.Instant
 import xyz.dead8309.nuvo.core.model.ChatMessage
 

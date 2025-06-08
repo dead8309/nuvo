@@ -29,8 +29,10 @@ interface McpToolExecutor {
     /**
      * Forces a refresh of the internal tool-to-server mapping. Should be called
      * when server configurations change.
+     *
+     * If [serverIds] is empty, it will refresh all servers.
      */
-    suspend fun refreshToolMapping()
+    suspend fun refreshToolMapping(serverIds: List<Long> = emptyList())
 
     companion object {
         fun createNamespacedToolName(

@@ -26,7 +26,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.NavDestination.Companion.hasRoute
 import xyz.dead8309.nuvo.R
+import xyz.dead8309.nuvo.navigation.McpRoute
 import xyz.dead8309.nuvo.navigation.NuvoNavHost
 import xyz.dead8309.nuvo.ui.components.AIModelSelectorSheet
 import xyz.dead8309.nuvo.ui.components.NuvoTopAppBar
@@ -77,11 +79,22 @@ fun Nuvo(
                         onModelChangeClick = { showAiModelSheet = true },
                         onMenuIconClick = { appState.openDrawer() },
                         onNewChatClick = appState::navigateToHome,
-                        onSettingsClick = appState::navigateToSettings
+                        onSettingsClick = appState::navigateToSettings,
+                        onMcpClick = appState::navigateToMcp,
+                        mcpCount = appState.mcpCount
                     )
                 } else {
                     TopAppBar(
-                        title = { Text(stringResource(R.string.settings_title)) },
+                        title = {
+                            Text(
+                                when {
+                                    appState.navController.currentDestination?.hasRoute(route = McpRoute::class) == true ->
+                                        stringResource(R.string.mcp_servers_title)
+
+                                    else -> stringResource(R.string.settings_title)
+                                }
+                            )
+                        },
                         navigationIcon = {
                             IconButton(onClick = appState::popBackStack) {
                                 Icon(
@@ -128,3 +141,4 @@ private fun NuvoPreview() {
         Nuvo(previewAppState)
     }
 }
+

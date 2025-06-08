@@ -1,11 +1,14 @@
 package xyz.dead8309.nuvo.data.repository
 
+import io.modelcontextprotocol.kotlin.sdk.Tool
 import kotlinx.coroutines.flow.Flow
 import net.openid.appauth.AuthState
+import xyz.dead8309.nuvo.core.database.entities.McpToolEntity
 import xyz.dead8309.nuvo.core.model.AppSettings
 import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.McpServer
 import xyz.dead8309.nuvo.core.model.PersistedOAuthDetails
+import xyz.dead8309.nuvo.data.model.AuthRequestDetails
 
 interface SettingsRepository {
     val appSettingsFlow: Flow<AppSettings>
@@ -36,6 +39,32 @@ interface SettingsRepository {
     suspend fun deleteMcpServer(id: Long)
 
     /**
+     * Updates the tools for a specific server.
+     */
+    suspend fun updateToolsForServer(serverId: Long, tools: List<Tool>): Result<Unit>
+
+    /**
+     * Clears locally stored tools for a server.
+     */
+    suspend fun clearToolsForServer(serverId: Long)
+
+    /**
+     * Updates server information.
+     */
+    suspend fun updateServerInfo(serverId: Long, serverVersion: String?)
+
+    /**
+     * Gets a flow of all tools for a specific server, for display in settings.
+     * (We'll return McpToolEntity for now, could map to a domain model later)
+     */
+    fun getToolsForServerSettings(serverId: Long): Flow<List<McpToolEntity>>
+
+    /**
+     * Enables or disables a specific tool.
+     */
+    suspend fun setToolEnabled(toolId: Long, isEnabled: Boolean)
+
+    /**
      * Saves discovered Authorization Server metadata URL.
      */
     suspend fun saveAuthorizationServerMetadataUrl(serverId: Long, url: String?)
@@ -61,7 +90,7 @@ interface SettingsRepository {
     /**
      * Retrieves the persisted [net.openid.appauth.AuthState] for a server.
      */
-    suspend fun getAuthState(serverId: Long): net.openid.appauth.AuthState?
+    suspend fun getAuthState(serverId: Long): AuthState?
 
     /**
      * Retrieves the OAuth details for a server
@@ -98,13 +127,3 @@ interface SettingsRepository {
     suspend fun performInitialAuthDiscovery(serverId: Long): Result<AuthStatus>
 }
 
-/**
- * information needed by AppAuth to build an AuthorizationRequest.
- */
-data class AuthRequestDetails(
-    val authorizationEndpointUri: android.net.Uri,
-    val tokenEndpointUri: android.net.Uri,
-    val registrationEndpointUri: android.net.Uri?,
-    val clientId: String,
-    val scopes: List<String>?, // null if not specified/needed
-)

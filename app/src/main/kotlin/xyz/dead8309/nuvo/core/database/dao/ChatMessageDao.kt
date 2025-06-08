@@ -5,7 +5,7 @@ import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
-import xyz.dead8309.nuvo.core.database.model.ChatMessageEntity
+import xyz.dead8309.nuvo.core.database.entities.ChatMessageEntity
 
 @Dao
 interface ChatMessageDao {

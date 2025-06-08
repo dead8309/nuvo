@@ -13,8 +13,8 @@ import xyz.dead8309.nuvo.core.database.dao.ChatMessageDao
 import xyz.dead8309.nuvo.core.database.dao.ChatSessionDao
 import xyz.dead8309.nuvo.core.model.ChatMessage
 import xyz.dead8309.nuvo.core.model.ChatSession
-import xyz.dead8309.nuvo.data.model.asDomainModel
-import xyz.dead8309.nuvo.data.model.asEntity
+import xyz.dead8309.nuvo.core.model.asDomainModel
+import xyz.dead8309.nuvo.core.model.asEntity
 import xyz.dead8309.nuvo.data.remote.openai.OpenAIService
 import xyz.dead8309.nuvo.di.IoDispatcher
 import javax.inject.Inject

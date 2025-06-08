@@ -13,6 +13,9 @@ data class ChatRoute(val chatSessionId: String?, val prompt: String?)
 @Serializable
 data object SettingsRoute
 
+@Serializable
+data object McpRoute
+
 fun NavController.navigateToSettings(navOptionsBuilder: NavOptionsBuilder.() -> Unit = {}) {
     navigate(SettingsRoute) { navOptionsBuilder() }
 }
@@ -48,3 +51,8 @@ fun NavController.navigateToNewChat(
         navOptionsBuilder()
     }
 }
+
+fun NavController.navigateToMcp(navOptionsBuilder: NavOptionsBuilder.() -> Unit = {}) {
+    navigate(McpRoute) { navOptionsBuilder() }
+}
+

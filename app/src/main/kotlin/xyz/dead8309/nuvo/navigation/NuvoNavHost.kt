@@ -7,6 +7,7 @@ import androidx.navigation.compose.composable
 import xyz.dead8309.nuvo.ui.NuvoAppState
 import xyz.dead8309.nuvo.ui.screens.chat.ChatScreen
 import xyz.dead8309.nuvo.ui.screens.home.HomeScreen
+import xyz.dead8309.nuvo.ui.screens.mcp.McpScreen
 import xyz.dead8309.nuvo.ui.screens.settings.SettingsScreen
 
 @Composable
@@ -35,5 +36,12 @@ fun NuvoNavHost(
         composable<SettingsRoute> {
             SettingsScreen()
         }
+
+        composable<McpRoute> {
+            McpScreen(
+                snackbarHostState = appState.snackbarHostState
+            )
+        }
     }
 }
+

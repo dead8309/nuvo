@@ -1,41 +1,48 @@
 package xyz.dead8309.nuvo.data.repository
 
-import android.net.Uri
 import android.util.Log
+import androidx.core.net.toUri
 import io.ktor.client.plugins.ClientRequestException
 import io.ktor.http.HttpStatusCode
+import io.modelcontextprotocol.kotlin.sdk.Tool
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import net.openid.appauth.AuthState
 import xyz.dead8309.nuvo.BuildConfig
 import xyz.dead8309.nuvo.core.database.dao.McpServerDao
+import xyz.dead8309.nuvo.core.database.dao.McpToolDao
+import xyz.dead8309.nuvo.core.database.entities.McpToolEntity
 import xyz.dead8309.nuvo.core.datastore.PreferenceDataStore
 import xyz.dead8309.nuvo.core.model.AppSettings
 import xyz.dead8309.nuvo.core.model.AuthStatus
 import xyz.dead8309.nuvo.core.model.ClientRegistrationRequest
 import xyz.dead8309.nuvo.core.model.McpServer
 import xyz.dead8309.nuvo.core.model.PersistedOAuthDetails
-import xyz.dead8309.nuvo.data.model.asDomainModel
-import xyz.dead8309.nuvo.data.model.asEntity
+import xyz.dead8309.nuvo.core.model.asDomainModel
+import xyz.dead8309.nuvo.core.model.asEntity
+import xyz.dead8309.nuvo.data.model.AuthRequestDetails
 import xyz.dead8309.nuvo.data.remote.oauth.OAuthService
 import xyz.dead8309.nuvo.di.IoDispatcher
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "SettingsRepositoryImpl"
+private const val WELL_KNOWN_OAUTH_AUTHORIZATION_SERVER = "/.well-known/oauth-authorization-server"
 
 @Singleton
 class SettingsRepositoryImpl @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val preferenceDataStore: PreferenceDataStore,
     private val mcpServerDao: McpServerDao,
+    private val mcpToolDao: McpToolDao,
     private val oauthService: OAuthService,
-    private val authStateManager: AuthStateManager
+    private val authStateManager: AuthStateManager,
+    private val json: Json
 ) : SettingsRepository {
-
     override val appSettingsFlow: Flow<AppSettings> =
         preferenceDataStore.appSettingsFlow.distinctUntilChanged()
 
@@ -45,7 +52,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override fun getAllMcpServers(): Flow<List<McpServer>> {
         return mcpServerDao.getAllServers()
-            .map { entities -> entities.map { it.asDomainModel() } }
+            .map { entities ->
+                entities.sortedByDescending { it.createdAt }.map { it.asDomainModel() }
+            }
             .distinctUntilChanged()
     }
 
@@ -55,19 +64,25 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun saveMcpSever(config: McpServer): Long = withContext(ioDispatcher) {
         val currentEntity = mcpServerDao.getServerById(config.id)
+        val serverIdToReturn: Long
         if (currentEntity != null && currentEntity.url != config.url) {
             Log.w(TAG, "Server URL changed for ${config.id}. clearing AuthState")
             authStateManager.clearAuthState(config.id)
+            mcpToolDao.deleteToolsForServer(config.id)
             val entityToSave = config.asEntity(currentEntity).copy(
                 authStatus = AuthStatus.NOT_CHECKED,
                 authorizationServerMetadataUrl = null,
-                oauthClientId = null
+                oauthClientId = null,
+                version = null
             )
             mcpServerDao.upsertServer(entityToSave)
+            serverIdToReturn = config.id
         } else {
-            mcpServerDao.upsertServer(config.asEntity(currentEntity))
+            config.asEntity(currentEntity)
+            val upsertedId = mcpServerDao.upsertServer(config.asEntity(currentEntity))
+            serverIdToReturn = if (config.id == 0L) upsertedId else config.id
         }
-        return@withContext config.id
+        return@withContext serverIdToReturn
     }
 
     override suspend fun setActiveMcpServer(id: Long, enabled: Boolean) =
@@ -82,10 +97,67 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun deleteMcpServer(id: Long): Unit = withContext(ioDispatcher) {
         mcpServerDao.deleteServer(id)
         clearOAuthDetails(id)
+        mcpToolDao.deleteToolsForServer(id)
         Log.d(TAG, "Deleted McpServer $id and oauth details")
     }
 
-    override suspend fun saveAuthorizationServerMetadataUrl(serverId: Long, url: String?): Unit =
+    override suspend fun updateToolsForServer(serverId: Long, tools: List<Tool>): Result<Unit> =
+        runCatching {
+            withContext(ioDispatcher) {
+                if (tools.isEmpty()) {
+                    Log.d(TAG, "No tools provided for server $serverId, clearing existing tools")
+                    mcpToolDao.deleteToolsForServer(serverId)
+                    return@withContext
+                }
+
+                val toolEntities = tools.map { tool ->
+                    McpToolEntity(
+                        serverId = serverId,
+                        originalToolName = tool.name,
+                        description = tool.description,
+                        inputSchemaJson = tool.inputSchema
+                    )
+                }
+                mcpToolDao.deleteToolsForServer(serverId)
+                mcpToolDao.insertTools(toolEntities)
+                Log.i(TAG, "Stored ${toolEntities.size} tools for server $serverId")
+            }
+        }.onFailure {
+            Log.e(TAG, "Failed to fetch tools for server $serverId", it)
+        }
+
+    override suspend fun clearToolsForServer(serverId: Long) {
+        mcpToolDao.deleteToolsForServer(serverId)
+        Log.i(TAG, "Cleared tools for server $serverId")
+    }
+
+    override suspend fun updateServerInfo(serverId: Long, serverVersion: String?): Unit =
+        withContext(ioDispatcher) {
+            val server = mcpServerDao.getServerById(serverId)
+            if (server != null) {
+                mcpServerDao.upsertServer(
+                    server.copy(
+                        version = serverVersion ?: server.version
+                    )
+                )
+                Log.d(TAG, "Updated server version for $serverId to $serverVersion")
+            } else {
+                Log.w(TAG, "Server not found to update version: $serverId")
+            }
+        }
+
+    override fun getToolsForServerSettings(serverId: Long): Flow<List<McpToolEntity>> {
+        return mcpToolDao.getToolsByServerId(serverId).distinctUntilChanged()
+    }
+
+    override suspend fun setToolEnabled(toolId: Long, isEnabled: Boolean) {
+        mcpToolDao.setToolEnabled(toolId, isEnabled)
+    }
+
+    override suspend fun saveAuthorizationServerMetadataUrl(
+        serverId: Long,
+        url: String?
+    ): Unit =
         withContext(ioDispatcher) {
             val server = mcpServerDao.getServerById(serverId)
             if (server != null) {
@@ -122,7 +194,10 @@ class SettingsRepositoryImpl @Inject constructor(
     ) {
         val currentAuthState = authStateManager.getAuthState(serverId)
         if (currentAuthState == null) {
-            Log.e(TAG, "Cannot update AuthState for server $serverId, no existing AuthState found")
+            Log.e(
+                TAG,
+                "Cannot update AuthState for server $serverId, no existing AuthState found"
+            )
             updateAuthStatus(serverId, AuthStatus.ERROR)
             throw IllegalStateException("AuthState not found for server $serverId")
         }
@@ -189,39 +264,37 @@ class SettingsRepositoryImpl @Inject constructor(
 
                 updateAuthStatus(serverId, AuthStatus.REQUIRED_DISCOVERY)
 
-                if (!server.requiresAuth) {
-                    val currentStatus = server.authStatus
-                    if (currentStatus == AuthStatus.NOT_REQUIRED || currentStatus == AuthStatus.NOT_CHECKED) {
-                        throw Exception("Server $serverId does not require authorization or discovery pending.")
-                    }
-                    // TODO: come back to this
-                    // fail for now
-                    if (currentStatus == AuthStatus.ERROR) {
-                        throw Exception("server $serverId does not require auth")
-                    }
-                }
-
-                val asMetadataUrl = server.authorizationServerMetadataUrl ?: run {
-                    Log.w(
-                        TAG,
-                        "AS metadata URL missing for server $serverId, attempting discovery..."
-                    )
-                    // TODO: come back to this
-                    // should we attempt discovery again ? or just fail outright
+                if (!server.requiresAuth && server.authStatus != AuthStatus.ERROR) {
                     val discoveryResult = performInitialAuthDiscovery(serverId).getOrThrow()
-                    if (discoveryResult != AuthStatus.REQUIRED_USER_ACTION && discoveryResult != AuthStatus.AUTHORIZED) {
+                    if (discoveryResult != AuthStatus.REQUIRED_USER_ACTION && discoveryResult != AuthStatus.AUTHORIZED && discoveryResult != AuthStatus.REQUIRED_NOT_AUTHORIZED) {
                         throw Exception("initial discovery failed or auth not needed, status: $discoveryResult")
                     }
-                    mcpServerDao.getServerById(serverId)?.authorizationServerMetadataUrl
-                        ?: throw Exception("AS metadata URL still missing after discovery for server $serverId")
+
+                    val updatedServer = mcpServerDao.getServerById(serverId)?.asDomainModel()
+                        ?: throw Exception("server $serverId not found after discovery")
+                    if (!updatedServer.requiresAuth) {
+                        throw Exception("Server $serverId does not require auth after discovery")
+                    }
                 }
 
-                // fetching AS details
+                val asMetadataUrl = server.authorizationServerMetadataUrl
+                    ?: mcpServerDao.getServerById(serverId)?.authorizationServerMetadataUrl
+                    ?: run {
+                        Log.w(
+                            TAG,
+                            "AS metadata URL missing for server $serverId, attempting discovery..."
+                        )
+                        performInitialAuthDiscovery(serverId).getOrThrow()
+                        mcpServerDao.getServerById(serverId)?.authorizationServerMetadataUrl
+                            ?: throw Exception("AS metadata URL still missing after discovery for server $serverId")
+                    }
+
                 updateAuthStatus(serverId, AuthStatus.REQUIRED_DISCOVERY)
                 val asMetadata =
                     oauthService.getAuthorizationServerMetadata(asMetadataUrl).getOrThrow()
 
-                var clientId = server.oauthClientId
+                var clientId =
+                    server.oauthClientId ?: mcpServerDao.getServerById(serverId)?.oauthClientId
 
                 if (clientId == null && asMetadata.registrationEndpoint != null) {
                     updateAuthStatus(serverId, AuthStatus.REQUIRED_REGISTRATION)
@@ -248,9 +321,9 @@ class SettingsRepositoryImpl @Inject constructor(
                 updateAuthStatus(serverId, AuthStatus.REQUIRED_USER_ACTION)
 
                 AuthRequestDetails(
-                    authorizationEndpointUri = Uri.parse(asMetadata.authorizationEndpoint),
-                    tokenEndpointUri = Uri.parse(asMetadata.tokenEndpoint),
-                    registrationEndpointUri = asMetadata.registrationEndpoint?.let { Uri.parse(it) },
+                    authorizationEndpointUri = asMetadata.authorizationEndpoint.toUri(),
+                    tokenEndpointUri = asMetadata.tokenEndpoint.toUri(),
+                    registrationEndpointUri = asMetadata.registrationEndpoint?.toUri(),
                     clientId = clientId,
                     scopes = asMetadata.scopesSupported
                 )
@@ -278,12 +351,18 @@ class SettingsRepositoryImpl @Inject constructor(
                 val newAuthStatus = when {
                     !requiresAuth -> {
                         Log.d(TAG, "Server no longer requires auth")
-                        clearOAuthDetails(serverId)
+                        // clearOAuthDetails(serverId)
+                        authStateManager.clearAuthState(serverId)
                         AuthStatus.NOT_REQUIRED
                     }
 
+                    requiresAuth && currentServer.oauthClientId != null && authStateManager.getAuthState(
+                        serverId
+                    )?.isAuthorized == true -> {
+                        AuthStatus.AUTHORIZED
+                    }
+
                     requiresAuth -> {
-                        Log.d(TAG, "Server now requires auth")
                         AuthStatus.REQUIRED_USER_ACTION
                     }
 
@@ -293,7 +372,9 @@ class SettingsRepositoryImpl @Inject constructor(
                 mcpServerDao.upsertServer(
                     currentServer.copy(
                         requiresAuth = requiresAuth,
-                        authStatus = newAuthStatus
+                        authStatus = newAuthStatus,
+                        oauthClientId = if (requiresAuth) null else currentServer.oauthClientId,
+                        authorizationServerMetadataUrl = if (!requiresAuth && currentServer.authStatus != AuthStatus.NOT_REQUIRED) null else currentServer.authorizationServerMetadataUrl
                     )
                 )
                 Log.d(
@@ -315,7 +396,7 @@ class SettingsRepositoryImpl @Inject constructor(
                 // skip for disabled
                 if (!server.enabled) {
                     Log.d(TAG, "Server $serverId is disabled, skipping discovery.")
-                    return@withContext AuthStatus.NOT_CHECKED
+                    return@withContext server.authStatus
 
                 }
 
@@ -323,14 +404,18 @@ class SettingsRepositoryImpl @Inject constructor(
                 updateAuthStatus(serverId, AuthStatus.REQUIRED_DISCOVERY)
 
                 val directAsMetadataUrl = try {
-                    Uri.parse(server.url)
+                    server.url.toUri()
                         .buildUpon()
-                        .path("/.well-known/oauth-authorization-server")
+                        .path(WELL_KNOWN_OAUTH_AUTHORIZATION_SERVER)
                         .clearQuery()
                         .build()
                         .toString()
                 } catch (e: Exception) {
-                    Log.e(TAG, "Invalid base URL format for server ${server.id}: ${server.url}", e)
+                    Log.e(
+                        TAG,
+                        "Invalid base URL format for server ${server.id}: ${server.url}",
+                        e
+                    )
                     updateAuthStatus(serverId, AuthStatus.ERROR)
                     throw Exception("Invalid server URL format", e)
                 }
@@ -339,13 +424,16 @@ class SettingsRepositoryImpl @Inject constructor(
                 val directAsResult =
                     oauthService.getAuthorizationServerMetadata(directAsMetadataUrl)
 
-                var authRequired = false
+                var authRequired = server.requiresAuth
                 var finalStatus: AuthStatus = AuthStatus.REQUIRED_NOT_AUTHORIZED
-                var metadataUrlToSave: String? = null
+                var metadataUrlToSave: String? = server.authorizationServerMetadataUrl
 
                 directAsResult.fold(
                     onSuccess = { metadata ->
-                        Log.i(TAG, "Direct AS metadata discovery successful for server $serverId")
+                        Log.i(
+                            TAG,
+                            "Direct AS metadata discovery successful for server $serverId"
+                        )
                         authRequired = true
                         metadataUrlToSave = directAsMetadataUrl
 
@@ -374,10 +462,12 @@ class SettingsRepositoryImpl @Inject constructor(
                             authStateManager.clearAuthState(serverId)
                             mcpServerDao.updateServerClientId(serverId, null)
                         } else {
-                            Log.e(TAG, "AS metadata discovery failed for server $serverId", error)
+                            Log.e(
+                                TAG,
+                                "AS metadata discovery failed for server $serverId",
+                                error
+                            )
                             finalStatus = AuthStatus.ERROR
-                            authRequired = server.requiresAuth
-                            metadataUrlToSave = server.authorizationServerMetadataUrl
                         }
                     }
                 )

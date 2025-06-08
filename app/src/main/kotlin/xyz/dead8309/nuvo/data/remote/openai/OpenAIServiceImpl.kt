@@ -90,7 +90,7 @@ class OpenAIServiceImpl @Inject constructor(
             }
             val sdkMessages = mapToSdkMessages(messages)
             val request = chatCompletionRequest {
-                model = ModelId("gpt-4o-mini")
+                model = ModelId("gpt-4.1")
                 this.messages = listOf(systemMessage) + sdkMessages
                 tools = availableTools
             }

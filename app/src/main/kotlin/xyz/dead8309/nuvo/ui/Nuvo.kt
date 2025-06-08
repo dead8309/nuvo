@@ -41,7 +41,7 @@ fun Nuvo(
     appState: NuvoAppState,
     modifier: Modifier = Modifier,
     // TODO: Inject or get current model name from a ViewModel later
-    currentAiModelName: String = "GPT-4o",
+    currentAiModelName: String = "gpt-4.1",
 ) {
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAiModelSheet by remember { mutableStateOf(false) }

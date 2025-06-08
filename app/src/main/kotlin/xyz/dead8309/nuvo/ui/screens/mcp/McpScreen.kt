@@ -40,14 +40,12 @@ import xyz.dead8309.nuvo.core.model.McpServer
 import xyz.dead8309.nuvo.data.remote.mcp.client.ConnectionState
 import xyz.dead8309.nuvo.ui.components.mpc.AddEditMcpServerDialog
 import xyz.dead8309.nuvo.ui.components.mpc.McpServerItem
-import xyz.dead8309.nuvo.ui.screens.settings.SettingsUiState
-import xyz.dead8309.nuvo.ui.screens.settings.SettingsViewModel
 import xyz.dead8309.nuvo.ui.theme.NuvoTheme
 
 @Composable
 fun McpScreen(
     modifier: Modifier = Modifier,
-    viewModel: SettingsViewModel = hiltViewModel(),
+    viewModel: McpViewModel = hiltViewModel(),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -132,14 +130,14 @@ fun McpScreen(
 @Composable
 private fun McpScreenContent(
     modifier: Modifier = Modifier,
-    state: SettingsUiState = SettingsUiState(),
+    state: McpUiState = McpUiState(),
     onSaveMcpConfig: (McpServer) -> Unit = {},
     onDeleteMcpConfig: (Long) -> Unit = {},
     onToggleMcpConfig: (Long, Boolean) -> Unit = { _, _ -> },
     onInitiateAuth: (Long) -> Unit = {},
 ) {
     var showAddEditMcpDialog by rememberSaveable { mutableStateOf(false) }
-    var mcpConfigToEdit by rememberSaveable { mutableStateOf<McpServer?>(null) }
+    var mcpConfigToEdit by remember { mutableStateOf<McpServer?>(null) }
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -232,7 +230,7 @@ private fun McpScreenContent(
 private fun McpScreenPreview() {
     NuvoTheme {
         McpScreenContent(
-            state = SettingsUiState(),
+            state = McpUiState(),
         )
     }
 }

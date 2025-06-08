@@ -6,13 +6,13 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
@@ -30,7 +30,7 @@ import xyz.dead8309.nuvo.navigation.navigateToHome
 import xyz.dead8309.nuvo.navigation.navigateToMcp
 import xyz.dead8309.nuvo.navigation.navigateToNewChat
 import xyz.dead8309.nuvo.navigation.navigateToSettings
-import xyz.dead8309.nuvo.ui.screens.settings.SettingsViewModel
+import xyz.dead8309.nuvo.ui.screens.mcp.McpViewModel
 
 @Composable
 fun rememberNuvoAppState(
@@ -38,15 +38,14 @@ fun rememberNuvoAppState(
     drawerState: DrawerState = rememberDrawerState(initialValue = DrawerValue.Closed),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     coroutineScope: CoroutineScope = rememberCoroutineScope(),
-    settingsViewModel: SettingsViewModel = hiltViewModel()
+    mcpViewModel: McpViewModel = hiltViewModel()
 ): NuvoAppState {
     val currentNavBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination: NavDestination? = currentNavBackStackEntry?.destination
 
-    // Get the count of MCP servers from the SettingsViewModel
-    val mcpServersCount by settingsViewModel.state
+    val mcpServersCount by mcpViewModel.state
         .map { it.mcpServers.size }
-        .collectAsState(initial = 0)
+        .collectAsStateWithLifecycle(0)
 
     return remember(
         navController,

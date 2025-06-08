@@ -250,7 +250,7 @@ class McpToolExecutorImpl @Inject constructor(
                 val newTools = mutableListOf<Tool>()
 
                 if (enabledServers.isEmpty()) {
-                    Log.w(TAG, "No enabled servers found for tool mapping")
+                    Log.w(TAG, "No enabled servers found for tool mapping, Reset mapping")
                     toolToServerMap = emptyMap()
                     availableTools = emptyList()
                     return@launch
